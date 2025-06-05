@@ -8,9 +8,12 @@ import scipy.signal
 import gym
 import os
 import datetime
+import torch.nn as nn
 from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
 
 #出牌模型
+
+
 
 class Actor(nn.Module):
     """
@@ -143,58 +146,7 @@ class Actor(nn.Module):
         return fixed_action_prob, discard_action_prob
 
     #PPO 中使用两个策略分布（一个选固定牌，一个选垫牌）组合成一个完整的动作，并进行训练更新
-    # 实现“先选主动作（固定牌），再选辅动作（垫牌）”的 分层决策机制（Hierarchical Policy）
-    def act(self, obs_x, actions_fixed, actions_discard, discard_num):
-        # 获取两个动作的概率分布
-        actions_fixed_prob, discard_action_prob = self.forward(obs_x, actions_fixed, actions_discard)
-        
-        #Categorical 是 PyTorch 中用于建模离散分类分布的类。
-        # Step 1: 选择固定牌型
-        distribution_fixed = Categorical(actions_fixed_prob)
-        action_fixed = distribution_fixed.sample()
-        log_prob_fixed = distribution_fixed.log_prob(action_fixed).sum(-1)# 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
-        action_fixed = action_fixed.detach()
-
-        # Step 2: 选择垫牌        
-        distribution_discard = Categorical(discard_action_prob)
-        actions_discard = t.multinomial(discard_action_prob, num_samples=discard_num, replacement=False)#无放回采样
-        log_probs_discard = distribution_discard.log_prob(actions_discard).sum(-1)# [batch_size, k]
-        actions_discard = actions_discard.detach()
-        
-        # Step 3: 返回两个动作和总 log prob
-        total_logprob = log_prob_fixed + log_probs_discard  # sum over multiple discards
-
-        return action_fixed, actions_discard[action_fixed], log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob
     
-
-    
-        #sample() 方法会从这个分布中按概率随机采样，鼓励探索, sample只支持有放回采样，所以不适用        
-        # action = distribution.sample()
-        # action_logprob = distribution.log_prob(action)
-        
-        #对于连续动作空间可以使用高斯分布（torch.distributions.Normal ）来建模策略
-        # mean = self.forward(obs_x)
-        # std = t.exp(self.log_std)  # 转换为标准差 σ
-        # distribution = t.distributions.Normal(mean, std)
-        # action = distribution.sample()
-        # action_logprob = distribution.log_prob(action).sum(-1)  # 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
-        # return action.detach(), action_logprob.detach()
-    
-    def evaluate(self, state: Tensor, action: Tensor):
-        mean = self.actor.forward(state)
-        std = t.exp(self.actor.log_std)
-        distribution = t.distributions.Normal(mean, std)
-        action_log_prob = distribution.log_prob(action).sum(-1)
-        entropy = distribution.entropy().sum(-1)#连续动作空间的熵
-        state_value = self.critic.forward(state)
-        return action_log_prob, state_value, entropy
-    
-    def act_all_probs(self, x: Tensor):
-        action_prob = self.forward(x)
-        distribution = Categorical(action_prob)
-        action = distribution.sample()
-        return action.detach().item(), action_prob.cpu().detach().numpy()
-
 
 class Critic(nn.Module):
     """
@@ -217,6 +169,7 @@ class Critic(nn.Module):
         forward procedure of the critic
         """
         return self.net.forward(x)
+
 
 
 class PPOClip(nn.Module):
@@ -350,27 +303,76 @@ class PPOClip(nn.Module):
         self.ptr = 0
         self.path_start_idx = 0
 
-    def evaluate(self, state: Tensor, action: Tensor):
-        """
-        evaluate the (state,action) pair and record logprobabilities from actor, state values from critic
-        and the entropy of the probability distribution from the actor.
-        -------
-        Parameters:
-            state: Tensor
-            action: Tensor
-        Returns:
-            action_log_prob: Tensor
-            state_values: Tensor
-            entropy: Tensor
+    # 实现“先选主动作（固定牌），再选辅动作（垫牌）”的 分层决策机制（Hierarchical Policy）
+    def act(self, obs_x, actions_fixed, actions_discard, discard_num):
+        # 获取两个动作的概率分布
+        actions_fixed_prob, discard_action_prob = self.actor(obs_x, actions_fixed, actions_discard)
+        
+        #Categorical 是 PyTorch 中用于建模离散分类分布的类。
+        # Step 1: 选择固定牌型
+        distribution_fixed = Categorical(actions_fixed_prob)
+        action_fixed = distribution_fixed.sample()
+        log_prob_fixed = distribution_fixed.log_prob(action_fixed).sum(-1)# 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
+        action_fixed = action_fixed.detach()
 
-        """
-        action_probs = self.actor.forward(state)
-        distribution = Categorical(action_probs)
-        action_log_prob = distribution.log_prob(action)
-        entropy = distribution.entropy()
-        state_values = self.critic.forward(state)
+        # Step 2: 选择垫牌        
+        distribution_discard = Categorical(discard_action_prob)
+        actions_discard = t.multinomial(discard_action_prob, num_samples=discard_num, replacement=False)#无放回采样
+        log_probs_discard = distribution_discard.log_prob(actions_discard).sum(-1)# [batch_size, k]
+        actions_discard = actions_discard.detach()
+        
+        # Step 3: 返回两个动作和总 log prob
+        total_logprob = log_prob_fixed + log_probs_discard  # sum over multiple discards
 
-        return action_log_prob, state_values, entropy
+        return action_fixed, actions_discard[action_fixed], log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob
+    
+
+    
+        #sample() 方法会从这个分布中按概率随机采样，鼓励探索, sample只支持有放回采样，所以不适用        
+        # action = distribution.sample()
+        # action_logprob = distribution.log_prob(action)
+        
+        #对于连续动作空间可以使用高斯分布（torch.distributions.Normal ）来建模策略
+        # mean = self.forward(obs_x)
+        # std = t.exp(self.log_std)  # 转换为标准差 σ
+        # distribution = t.distributions.Normal(mean, std)
+        # action = distribution.sample()
+        # action_logprob = distribution.log_prob(action).sum(-1)  # 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
+        # return action.detach(), action_logprob.detach()
+    
+    def evaluate(self, obs_x, actions_fixed, actions_discard, discard_num):
+        actions_fixed_prob, discard_action_prob = self.forward(obs_x, actions_fixed, actions_discard)
+
+        #固定组合牌
+        distribution_fixed = Categorical(actions_fixed_prob)
+        action_fixed = distribution_fixed.sample()
+        log_prob_fixed = distribution_fixed.log_prob(action_fixed).sum(-1)# 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
+        entropy_fixed = distribution_fixed.entropy().sum(-1)#连续动作空间的熵
+        action_fixed = action_fixed.detach()
+
+        #垫牌
+        distribution_discard = Categorical(discard_action_prob)
+        actions_discard = t.multinomial(discard_action_prob, num_samples=discard_num, replacement=False)#无放回采样
+        log_probs_discard = distribution_discard.log_prob(actions_discard).sum(-1)# [batch_size, k]
+        entropy_discard = distribution_discard.entropy().sum(-1)
+        actions_discard = actions_discard.detach()
+        
+        #状态评价
+        state_value = self.critic.forward(obs_x)
+
+        # mean = self.actor.forward(state)
+        # std = t.exp(self.actor.log_std)
+        # distribution = t.distributions.Normal(mean, std)
+        # action_log_prob = distribution.log_prob(action).sum(-1)
+        # entropy = distribution.entropy().sum(-1)#连续动作空间的熵
+        # state_value = self.critic.forward(state)
+        # return action_log_prob, state_value, entropy
+    
+    def act_all_probs(self, x: Tensor):
+        action_prob = self.forward(x)
+        distribution = Categorical(action_prob)
+        action = distribution.sample()
+        return action.detach().item(), action_prob.cpu().detach().numpy()
 
 
 
