@@ -13,7 +13,7 @@ import traceback
 from rlcard.utils.file_writer import FileWriter
 from rlcard.games.tractors.models import tractorModel
 from rlcard.games.tractors.models import tractorActor
-from .env import tractors_env as tractorsEnv
+from .env.tractors_env import run
 # from .utils import get_batch, log, create_env, create_buffers, create_optimizers, act
 shandle = logging.StreamHandler()
 shandle.setFormatter(
@@ -47,16 +47,56 @@ def create_buffers(flags, device_iterator):
     # self.buffer["values"][self.ptr] = value.cpu().detach().numpy()
 
     T = flags.unroll_length
-    positions = ['banker', 'player']#庄家 闲家
-    buffers = {}
+
+    
+
+    buffer = {}
     for device in device_iterator:
-        buffers[device] = {}
-        for position in positions:
-            x_dim = 319 if position == 'banker' else 430#状态维度
+        buffer[device] = {}
+
+        #叫牌buffer obs_x, bid_card, left_num
+        state_dim = 319
+        specs = dict(
+            score=dict(size=(T,), dtype=torch.float32),
+            states=dict(size=(T, state_dim), dtype=torch.int8),
+            bid_card=dict(size=(T, 2,14,4), dtype=torch.int8),
+            left_num=dict(size=(T,), dtype=torch.float32),
+        )
+        _buffers: Buffers = {key: [] for key in specs}
+        for _ in range(flags.num_buffers):
+            for key in _buffers:
+                if not device == "cpu":
+                    _buffer = torch.empty(**specs[key]).to(torch.device('cuda:'+str(device))).share_memory_()
+                else:
+                    _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
+                _buffers[key].append(_buffer)
+        buffer[device]['bid'] = _buffers
+
+        #埋底牌 own_cards, partner_bid_cards, rival_bid_cards
+        specs = dict(
+            score=dict(size=(T,), dtype=torch.float32),
+            own_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
+            partner_bid_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
+            rival_bid_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
+        )
+        _buffers: Buffers = {key: [] for key in specs}
+        for _ in range(flags.num_buffers):
+            for key in _buffers:
+                if not device == "cpu":
+                    _buffer = torch.empty(**specs[key]).to(torch.device('cuda:'+str(device))).share_memory_()
+                else:
+                    _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
+                _buffers[key].append(_buffer)
+        buffer[device]['cover'] = _buffers
+
+    
+        #出牌buffer
+        for position in ['banker', 'player']:#庄家 闲家
+            state_dim = 319 if position == 'banker' else 430#状态维度
             specs = dict(
                 done=dict(size=(T,), dtype=torch.bool),
                 rewards=dict(size=(T,), dtype=torch.float32),
-                states=dict(size=(T, x_dim), dtype=torch.int8),
+                states=dict(size=(T, state_dim), dtype=torch.int8),
                 action=dict(size=(T,), dtype=torch.float32),
                 log_probs=dict(size=(T,), dtype=torch.float32),
                 values=dict(size=(T,), dtype=torch.float32),
@@ -71,8 +111,10 @@ def create_buffers(flags, device_iterator):
                     else:
                         _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
                     _buffers[key].append(_buffer)
-            buffers[device][position] = _buffers
-    return buffers
+            buffer[device][position] = _buffers
+
+        
+    return buffer
 
 def get_batch(free_queue,
               full_queue,
@@ -93,121 +135,9 @@ def get_batch(free_queue,
     for m in indices:
         free_queue.put(m)
     return batch
-
-def act(i, device, free_queue, full_queue, actor, buffers, flags):
-    """
-    This function will run forever until we stop it. It will generate
-    data from the environment and send the data to buffer. It uses
-    a free queue and full queue to syncup with the main process.
-    """
-    positions = ['bidding', 'conver', 'play']
-    try:
-        T = flags.unroll_length
-        log.info('Device %s Actor %i started.', str(device), i)
-
-        env = tractorsEnv(flags)
-        # env = Environment(env, device)
-
-        done_buf = {p: [] for p in positions}
-        episode_return_buf = {p: [] for p in positions}
-        target_buf = {p: [] for p in positions}
-        obs_x_no_action_buf = {p: [] for p in positions}
-        obs_action_buf = {p: [] for p in positions}
-        obs_z_buf = {p: [] for p in positions}
-        size = {p: 0 for p in positions}
-
-        env.reset()
-
-        while True:
-            response = []
-            while not env.isFinalRound():
-                env.step(response)
-                
-                err = env.getError()
-                if len(err)>0:
-                    print(err[len(err)-1])
-                    env.reset()
-                    env.step(response)
-
-                stage = env.getStage()
-                if stage == "deal":
-                    level = env.getLevel()
-                    get_card = env.getDeliver()[0]
-                    called_list = env.getCalledList()       
-                    own_pos = env.getPlayerPosition()
-                    hold = env.getPlayerHoldCards(own_pos)
-                    major = env.getMajor()
-                    response = [own_pos, actor.biddingMajor(get_card, hold, own_pos, called_list, major, level)]
-                
-                # elif stage == "cover":
-                #     publiccard = env.getPublicCards()
-                #     banker = env.getBanker()
-                #     hold = env.getPlayerHoldCards(banker)
-                #     major = env.getMajor()
-                #     level = env.getLevel()
-                #     response = [banker, actor.coverCard(publiccard, hold, major, level)]
-                    
-                # elif stage == "play":
-                #     history = env.getPlayHistory()
-                #     history_curr = history[1]
-                #     hold = env.getPlayerHoldCards(env.getPlayerPosition())
-                #     level = env.getLevel()                    
-                #     legalMoveCards = env.playCard(history_curr, hold, level)
-                #     response = [env.getPlayerPosition(), legalMoveCards]
-                    
+    #使用PPOClip的generate_batches
 
 
-                    
-                obs_x_no_action_buf[position].append(env_output['obs_x_no_action'])
-                obs_z_buf[position].append(env_output['obs_z'])
-                with torch.no_grad():
-                    agent_output = model.forward(position, obs['z_batch'], obs['x_batch'], flags=flags)
-                _action_idx = int(agent_output['action'].cpu().detach().numpy())
-                action = obs['legal_actions'][_action_idx]
-                obs_action_buf[position].append(_cards2tensor(action))
-                size[position] += 1
-                position, obs, env_output = env.step(action)
-                if env_output['done']:
-                    for p in positions:
-                        diff = size[p] - len(target_buf[p])
-                        if diff > 0:
-                            done_buf[p].extend([False for _ in range(diff-1)])
-                            done_buf[p].append(True)
-
-                            episode_return = env_output['episode_return'] if p == 'landlord' else -env_output['episode_return']
-                            episode_return_buf[p].extend([0.0 for _ in range(diff-1)])
-                            episode_return_buf[p].append(episode_return)
-                            target_buf[p].extend([episode_return for _ in range(diff)])
-                    break
-
-            for p in positions:
-                while size[p] > T: 
-                    index = free_queue[p].get()
-                    if index is None:
-                        break
-                    for t in range(T):
-                        buffers[p]['done'][index][t, ...] = done_buf[p][t]
-                        buffers[p]['episode_return'][index][t, ...] = episode_return_buf[p][t]
-                        buffers[p]['target'][index][t, ...] = target_buf[p][t]
-                        buffers[p]['obs_x_no_action'][index][t, ...] = obs_x_no_action_buf[p][t]
-                        buffers[p]['obs_action'][index][t, ...] = obs_action_buf[p][t]
-                        buffers[p]['obs_z'][index][t, ...] = obs_z_buf[p][t]
-                    full_queue[p].put(index)
-                    done_buf[p] = done_buf[p][T:]
-                    episode_return_buf[p] = episode_return_buf[p][T:]
-                    target_buf[p] = target_buf[p][T:]
-                    obs_x_no_action_buf[p] = obs_x_no_action_buf[p][T:]
-                    obs_action_buf[p] = obs_action_buf[p][T:]
-                    obs_z_buf[p] = obs_z_buf[p][T:]
-                    size[p] -= T
-
-    except KeyboardInterrupt:
-        pass  
-    except Exception as e:
-        log.error('Exception in worker process %i', i)
-        traceback.print_exc()
-        print()
-        raise e
     
 def compute_loss(logits, targets):
     loss = ((logits.squeeze(-1) - targets)**2).mean()
@@ -251,13 +181,7 @@ def learn(position,
             actor_model.get_model(position).load_state_dict(model.state_dict())
         return stats
 
-def train(flags):  
-    """
-    This is the main funtion for training. It will first
-    initilize everything, such as buffers, optimizers, etc.
-    Then it will start subprocesses as actors. Then, it will call
-    learning function with  multiple threads.
-    """
+def train(flags):
     if not flags.actor_device_cpu or flags.training_device != 'cpu':
         if not torch.cuda.is_available():
             raise AssertionError("CUDA not available. If you have GPUs, please specify the ID after `--gpu_devices`. Otherwise, please train with CPU with `python3 train.py --actor_device_cpu --training_device cpu`")
@@ -296,13 +220,13 @@ def train(flags):
     full_queue = {}
         
     for device in device_iterator:
-        _free_queue = {'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
-        _full_queue = {'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
+        _free_queue = {'bid': ctx.SimpleQueue(), 'cover': ctx.SimpleQueue(), 'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
+        _full_queue = {'bid': ctx.SimpleQueue(), 'cover': ctx.SimpleQueue(), 'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
         free_queue[device] = _free_queue
         full_queue[device] = _full_queue
 
     # Learner model for training
-    learner_playModel = {"banker":tractorModel(device=flags.training_device, flags=flags), "player":tractorModel(device=flags.training_device, flags=flags)}
+    learner_playModel = tractorActor(device=device, flags=flags)
 
     # Stat Keys
     stat_keys = [
@@ -314,18 +238,18 @@ def train(flags):
         'loss_landlord_down',
     ]
     frames, stats = 0, {k: 0 for k in stat_keys}
-    position_frames = {'landlord':0, 'landlord_up':0, 'landlord_down':0}
+    position_frames = {'bid':0, 'cover':0, 'banker':0, 'player':0}
 
     # Load models if any
     if flags.load_model and os.path.exists(checkpointpath):
         checkpoint_states = torch.load(
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
-        for k in ['banker', 'player']:
-            learner_playModel[k].load_checkpoint(checkpoint_states["model_state_dict"][k])
-            learner_playModel[k].load_optim_checkpoint(checkpoint_states["optimizer_state_dict"][k])
+        for k in ['bid', 'cover', 'banker', 'player']:
+            assert learner_playModel.load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
+            assert learner_playModel.load_optim_checkpoint(k, checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
-                actors[device].load_state_dict(k).load_state_dict(checkpoint_states["model_state_dict"][k])
+                actors[device].load_state_dict(k,checkpoint_states["model_state_dict"][k])
         stats = checkpoint_states["stats"]
         frames = checkpoint_states["frames"]
         position_frames = checkpoint_states["position_frames"]
@@ -336,7 +260,7 @@ def train(flags):
         num_actors = flags.num_actors
         for i in range(flags.num_actors):
             actor_pro = ctx.Process(
-                target=act,
+                target=run,
                 args=(i, device, free_queue[device], full_queue[device], actors[device], buffers[device], flags))
             actor_pro.start()
             actor_processes.append(actor_pro)

@@ -324,7 +324,7 @@ class PPOClip(nn.Module):
         # Step 3: 返回两个动作和总 log prob
         total_logprob = log_prob_fixed + log_probs_discard  # sum over multiple discards
 
-        return action_fixed, actions_discard[action_fixed], log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob
+        return action_fixed, actions_discard[action_fixed], log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob.detach()
     
 
     
@@ -348,18 +348,18 @@ class PPOClip(nn.Module):
         action_fixed = distribution_fixed.sample()
         log_prob_fixed = distribution_fixed.log_prob(action_fixed).sum(-1)# 如果动作是多维的（n_actions > 1），则 log_prob 返回的是每个维度的对数概率，需要用 .sum(-1) 合并成一个标量。
         entropy_fixed = distribution_fixed.entropy().sum(-1)#连续动作空间的熵
-        action_fixed = action_fixed.detach()
+        # action_fixed = action_fixed.detach()
 
         #垫牌
         distribution_discard = Categorical(discard_action_prob)
         actions_discard = t.multinomial(discard_action_prob, num_samples=discard_num, replacement=False)#无放回采样
         log_probs_discard = distribution_discard.log_prob(actions_discard).sum(-1)# [batch_size, k]
         entropy_discard = distribution_discard.entropy().sum(-1)
-        actions_discard = actions_discard.detach()
+        # actions_discard = actions_discard.detach()
         
         #状态评价
         state_value = self.critic.forward(obs_x)
-
+        return log_prob_fixed, log_probs_discard, state_value, entropy_fixed, entropy_discard
         # mean = self.actor.forward(state)
         # std = t.exp(self.actor.log_std)
         # distribution = t.distributions.Normal(mean, std)

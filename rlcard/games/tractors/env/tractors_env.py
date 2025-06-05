@@ -213,3 +213,119 @@ def _process_action_seq(sequence, length=9):
         empty_sequence.extend(sequence)
         sequence = empty_sequence
     return sequence
+
+
+def run(i, device, free_queue, full_queue, actor, buffers, flags):
+    """
+    This function will run forever until we stop it. It will generate
+    data from the environment and send the data to buffer. It uses
+    a free queue and full queue to syncup with the main process.
+    """
+    positions = ['bidding', 'conver', 'play']
+    try:
+        T = flags.unroll_length
+        log.info('Device %s Actor %i started.', str(device), i)
+
+        env = tractorsEnv(flags)
+        # env = Environment(env, device)
+
+        done_buf = {p: [] for p in positions}
+        episode_return_buf = {p: [] for p in positions}
+        target_buf = {p: [] for p in positions}
+        obs_x_no_action_buf = {p: [] for p in positions}
+        obs_action_buf = {p: [] for p in positions}
+        obs_z_buf = {p: [] for p in positions}
+        size = {p: 0 for p in positions}
+
+        env.reset()
+
+        while True:
+            response = []
+            while not env.isFinalRound():
+                env.step(response)
+                
+                err = env.getError()
+                if len(err)>0:
+                    print(err[len(err)-1])
+                    env.reset()
+                    env.step(response)
+
+                stage = env.getStage()
+                if stage == "deal":
+                    level = env.getLevel()
+                    get_card = env.getDeliver()[0]
+                    called_list = env.getCalledList()       
+                    own_pos = env.getPlayerPosition()
+                    hold = env.getPlayerHoldCards(own_pos)
+                    major = env.getMajor()
+                    response = [own_pos, actor.biddingMajor(get_card, hold, own_pos, called_list, major, level)]
+                
+                # elif stage == "cover":
+                #     publiccard = env.getPublicCards()
+                #     banker = env.getBanker()
+                #     hold = env.getPlayerHoldCards(banker)
+                #     major = env.getMajor()
+                #     level = env.getLevel()
+                #     response = [banker, actor.coverCard(publiccard, hold, major, level)]
+                    
+                # elif stage == "play":
+                #     history = env.getPlayHistory()
+                #     history_curr = history[1]
+                #     hold = env.getPlayerHoldCards(env.getPlayerPosition())
+                #     level = env.getLevel()                    
+                #     legalMoveCards = env.playCard(history_curr, hold, level)
+                #     response = [env.getPlayerPosition(), legalMoveCards]
+                    
+
+
+                    
+                obs_x_no_action_buf[position].append(env_output['obs_x_no_action'])
+                obs_z_buf[position].append(env_output['obs_z'])
+                with torch.no_grad():
+                    agent_output = model.forward(position, obs['z_batch'], obs['x_batch'], flags=flags)
+                _action_idx = int(agent_output['action'].cpu().detach().numpy())
+                action = obs['legal_actions'][_action_idx]
+                obs_action_buf[position].append(_cards2tensor(action))
+                size[position] += 1
+                position, obs, env_output = env.step(action)
+                if env_output['done']:
+                    for p in positions:
+                        diff = size[p] - len(target_buf[p])
+                        if diff > 0:
+                            done_buf[p].extend([False for _ in range(diff-1)])
+                            done_buf[p].append(True)
+
+                            episode_return = env_output['episode_return'] if p == 'landlord' else -env_output['episode_return']
+                            episode_return_buf[p].extend([0.0 for _ in range(diff-1)])
+                            episode_return_buf[p].append(episode_return)
+                            target_buf[p].extend([episode_return for _ in range(diff)])
+                    break
+
+            for p in positions:
+                while size[p] > T: 
+                    index = free_queue[p].get()
+                    if index is None:
+                        break
+                    for t in range(T):
+                        buffers[p]['done'][index][t, ...] = done_buf[p][t]
+                        buffers[p]['episode_return'][index][t, ...] = episode_return_buf[p][t]
+                        buffers[p]['target'][index][t, ...] = target_buf[p][t]
+                        buffers[p]['obs_x_no_action'][index][t, ...] = obs_x_no_action_buf[p][t]
+                        buffers[p]['obs_action'][index][t, ...] = obs_action_buf[p][t]
+                        buffers[p]['obs_z'][index][t, ...] = obs_z_buf[p][t]
+                    full_queue[p].put(index)
+                    done_buf[p] = done_buf[p][T:]
+                    episode_return_buf[p] = episode_return_buf[p][T:]
+                    target_buf[p] = target_buf[p][T:]
+                    obs_x_no_action_buf[p] = obs_x_no_action_buf[p][T:]
+                    obs_action_buf[p] = obs_action_buf[p][T:]
+                    obs_z_buf[p] = obs_z_buf[p][T:]
+                    size[p] -= T
+
+    except KeyboardInterrupt:
+        pass  
+    except Exception as e:
+        log.error('Exception in worker process %i', i)
+        traceback.print_exc()
+        print()
+        raise e

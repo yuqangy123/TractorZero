@@ -37,7 +37,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--savedir',
-        default='experiments/dmc_result',
+        default='experiments/ppo_result',
         help='Root dir where experiment data will be saved'
     )
     parser.add_argument(
