@@ -1195,8 +1195,8 @@ class tractorsGame():
         return self.globalInfo["playerpos"]
     
     #获取出牌历史
-    def getHistory(self):
-        return self.globalInfo["history"]
+    def getLastHistory(self):
+        return self.globalInfo["last_history"]
 
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机；可选单牌）
     #play_poker 已出牌, 整型    
@@ -2024,7 +2024,7 @@ class tractorsGame():
 
                 # 仍然给庄家发request
                 self.globalInfo["stage"] = "play"
-                self.globalInfo["history"] = [[],[], currplayer, currplayer]
+                self.globalInfo["last_history"] = [[],[], currplayer, currplayer]
                 self.globalInfo["total_score"] = 0
                 logs = {"output":{
                     "command": "request",
@@ -2060,7 +2060,7 @@ class tractorsGame():
                     #move = response[str(player)]["response"] 
                     # 由于甩牌有失败的可能性，这里必须使用记录的history恢复局面
                     player_prov = int(list(request["output"]["content"].keys())[0])
-                    hist_prov = request["output"]["content"][str(player_prov)]["history"]
+                    hist_prov = request["output"]["content"][str(player_prov)]["last_history"]
                     if len(hist_prov[1]) > 0:
                         move = hist_prov[1][-1] #此处功能未测试
                         player = (player_prov-1) % 4
@@ -2081,7 +2081,7 @@ class tractorsGame():
                 # if len(curr_move) == 0:
                 #     self.setError(currplayer, "INVALID_MOVE")
                 # latest_request = full_input["log"][-2]
-                history = self.globalInfo["history"]
+                history = self.globalInfo["last_history"]
                 for pok in curr_move:
                     if pok not in self.curr_alloc[currplayer]:
                         self.setError(currplayer, "NOT_YOUR_POKER")
@@ -2178,7 +2178,7 @@ class tractorsGame():
                 history[1] = new_history
                 self.globalInfo["playerpos"] = nextplayer
                 self.globalInfo["stage"] = "play"
-                self.globalInfo["history"] = history
+                self.globalInfo["last_history"] = history
 
                 self.logs.append({"output":{
                     "command": "request",
@@ -2227,7 +2227,7 @@ def run(env):
         hold = env.getPlayerHoldCards(env.getBanker())
         response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
     elif stage == "play":
-        history = env.getHistory()
+        history = env.getLastHistory()
         history_curr = history[1]
         hold = env.getPlayerHoldCards(env.getPlayerPosition())
         

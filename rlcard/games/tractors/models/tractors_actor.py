@@ -21,7 +21,7 @@ from rlcard.tractors.models.tractors_model import TractorsModel as Model
 
 from rlcard.games.tractors.models.bid_model import BidModel
 from rlcard.games.tractors.models.cover_model import CoverModel
-from rlcard.games.tractors.models.play_model import PlayModel
+from rlcard.games.tractors.models.play_model import PPOClip as PlayModel
 
 
 ActionNumber = 2
@@ -36,18 +36,18 @@ class TractorsActor():
         
 
 
-    def biddingMajor(self, get_card, hold_card, bid_card, own_seat, bid_history, level):
+    def biddingMajor(self, get_card, hold_card, bid_card, own_seat, bid_history, major, level):
         '''
             owned 自己的位置
             called 首次报主的玩家位置
             snatched 反主的玩家位置
         '''
         hold_card = get_card+hold_card
-        hold_card = cards2matrix(hold_card, level)
+        hold_card = cards2matrix(hold_card, level, major)
         left_num = 25 - sum(hold_card)
         left_num = get_one_hot_array(left_num)
 
-        bid_card = cards2matrix(bid_card, level)
+        bid_card = cards2matrix(bid_card, level, major)
 
         #友方的牌
         partner_called = []
@@ -82,8 +82,15 @@ class TractorsActor():
         cover_card = matrix2card(cover_card)
         return cover_card
 
-    def playCard():
-        pass
+    def playCard(self, obs_x, actions_fixed, actions_discard, discard_num, is_banker):
+        if is_banker:
+            fixed_cards, display_cards,_,_,_ = self.__models['banker'].act(obs_x, actions_fixed, actions_discard, discard_num)
+        else:
+            fixed_cards, display_cards,_,_,_ = self.__models['player'].act(obs_x, actions_fixed, actions_discard, discard_num)
+        
+        out_cards = fixed_cards + display_cards
+        out_cards = matrix2card(out_cards)
+        return out_cards
 
     def load_state_dict(self, model_name, dict):
         if model_name in self.__models:

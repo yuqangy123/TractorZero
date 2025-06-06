@@ -558,12 +558,3 @@ class PPOClip(nn.Module):
                     break
             print(f"ep:{ep} reward:{current_episode_reward}")
 
-
-
-
-class PlayModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def load_checkpoint(self):
-        pass

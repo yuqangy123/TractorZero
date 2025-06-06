@@ -1,7 +1,8 @@
 from collections import Counter, OrderedDict
 import numpy as np
 import torch
-from rlcard.tractors.games.tractors_game import tractorsGame as Game
+
+from rlcard.games.tractors.env import tractors_game as Game
 from rlcard.tractors.utils import *
 
 class TractorsEnv(Game):
@@ -221,12 +222,12 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
     data from the environment and send the data to buffer. It uses
     a free queue and full queue to syncup with the main process.
     """
-    positions = ['bidding', 'conver', 'play']
+    positions = ['bid', 'conver', 'banker', 'player']
     try:
         T = flags.unroll_length
-        log.info('Device %s Actor %i started.', str(device), i)
+        print('Device %s Actor %i started.', str(device), i)
 
-        env = tractorsEnv(flags)
+        env = TractorsEnv(flags)
         # env = Environment(env, device)
 
         done_buf = {p: [] for p in positions}
@@ -236,6 +237,11 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         obs_action_buf = {p: [] for p in positions}
         obs_z_buf = {p: [] for p in positions}
         size = {p: 0 for p in positions}
+
+        #发牌阶段的回放经验
+        bid_buff = []
+        #埋牌阶段的回放经验
+        cover_buff = []
 
         env.reset()
 
@@ -251,30 +257,46 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     env.step(response)
 
                 stage = env.getStage()
+                #发牌阶段
                 if stage == "deal":
                     level = env.getLevel()
-                    get_card = env.getDeliver()[0]
+                    deal_card = env.getDeliver()[0]
                     called_list = env.getCalledList()       
                     own_pos = env.getPlayerPosition()
-                    hold = env.getPlayerHoldCards(own_pos)
+                    hold_cards = env.getPlayerHoldCards(own_pos)
                     major = env.getMajor()
-                    response = [own_pos, actor.biddingMajor(get_card, hold, own_pos, called_list, major, level)]
-                
-                # elif stage == "cover":
-                #     publiccard = env.getPublicCards()
-                #     banker = env.getBanker()
-                #     hold = env.getPlayerHoldCards(banker)
-                #     major = env.getMajor()
-                #     level = env.getLevel()
-                #     response = [banker, actor.coverCard(publiccard, hold, major, level)]
+
+                    with torch.no_grad():
+                        #self, get_card, hold_card, bid_card, own_seat, bid_history, major, level
+                        bid_card = [env.Poker2Num(major + level,[])]*len(called_list)#构造当前已经叫的主牌
+                        agent_output = actor.biddingMajor(deal_card, hold_cards, bid_card, own_pos, called_list, major, level)
+                    response = [own_pos, agent_output]
+                    if len(agent_output)>0:
+                        bid_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
+                   
+
+
+                #埋牌阶段
+                elif stage == "cover":
+                    publiccard = env.getPublicCards()
+                    banker = env.getBanker()
+                    hold_cards = env.getPlayerHoldCards(banker)
+                    major = env.getMajor()
+                    level = env.getLevel()
+                    #self, public_card, hold_card, own_seat, bid_history, level, major
+                    agent_output = actor.coverCard(publiccard, hold_cards, major, level)
+                    response = [banker, agent_output]
+                    if len(agent_output)>0:
+                        cover_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
                     
-                # elif stage == "play":
-                #     history = env.getPlayHistory()
-                #     history_curr = history[1]
-                #     hold = env.getPlayerHoldCards(env.getPlayerPosition())
-                #     level = env.getLevel()                    
-                #     legalMoveCards = env.playCard(history_curr, hold, level)
-                #     response = [env.getPlayerPosition(), legalMoveCards]
+                elif stage == "play":
+                    history = env.getPlayHistory()
+                    history_curr = history[1]
+                    hold = env.getPlayerHoldCards(env.getPlayerPosition())
+                    level = env.getLevel()                    
+                    out_cards = env.playCard(history_curr, hold, level)
+                    
+                    response = [env.getPlayerPosition(), out_cards]
                     
 
 
