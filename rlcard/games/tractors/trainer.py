@@ -161,7 +161,7 @@ def learn(position,
     obs_x = torch.flatten(obs_x, 0, 1)
     obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
     target = torch.flatten(batch['target'].to(device), 0, 1)
-    episode_returns = batch['episode_return'][batch['done']]
+    episode_returns = batch[''][batch['done']]
     mean_episode_return_buf[position].append(torch.mean(episode_returns).to(device))
         
     with lock:

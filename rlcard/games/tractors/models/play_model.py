@@ -11,7 +11,54 @@ import datetime
 import torch.nn as nn
 from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
 
-#出牌模型
+'''出牌模型'''
+
+#玩家出牌信息编码器
+class PlayerEncoder(nn.Module):
+    """
+    玩家出牌信息特征编码器，用于表示历史出牌中或当前回合中玩家的出牌信息特征
+    由手牌+座位号+阵营组成，座位号需转为以自己为1号位的本地座位号
+    hand_matrix: [batch, 2, 14, 4] 手牌矩阵
+    seat_id: [batch] 座位ID (1-4)
+    team_id: [batch] 阵营ID (1或2，1为我方，2为敌方)
+    经过融合层输出128维的特征向量
+    """
+    def __init__(self):
+        super(PlayerEncoder, self).__init__()
+        cards_embed_dim=2*14*4
+        seat_embed_dim=4
+        team_embed_dim=2
+        self.output_dim = 128
+        
+        # 手牌特征提取器 (2,14,4) -> 256维
+        self.cards_restnet = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
+        
+        # 融合层
+        self.fusion = nn.Sequential(
+            nn.Linear(cards_embed_dim + seat_embed_dim + team_embed_dim, (cards_embed_dim + seat_embed_dim + team_embed_dim)*2),
+            nn.LeakyReLU(),
+            nn.Linear((cards_embed_dim + seat_embed_dim + team_embed_dim)*2, self.output_dim),
+            nn.LeakyReLU(),
+            nn.LayerNorm(self.output_dim))
+    
+    def forward(self, hand_matrix, seat_id, team_id):
+        b = hand_matrix.shape[0]#batch
+
+        # 提取手牌特征
+        hand_card_feat = self.cards_restnet(hand_matrix)
+        
+        # 位置和阵营嵌入属性
+        seat_emb = t.zeros((b,4), device=seat_id.device)
+        # 使用 scatter_ 在 dim=1 上，按 seat_id-1 的索引赋值 1
+        seat_emb.scatter_(1, (seat_id - 1).long(), 1)
+        team_emb = t.zeros((b,2), device=team_id.device)
+        team_emb.scatter_(1, (team_id - 1).long(), 1)
+        
+        # 融合特征
+        combined = t.cat([hand_card_feat, seat_emb, team_emb], dim=1)
+        player_embed = self.fusion(combined)
+        
+        return player_embed
 
 
 
@@ -36,7 +83,17 @@ class Actor(nn.Module):
         
         '''        
         self.cards_restnet = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
-        self.lstm = nn.LSTM(108, 96, batch_first=True)
+        self.player_encoder = PlayerEncoder()
+        self.lstm = nn.LSTM(self.player_encoder.output_dim, 96, batch_first=True)
+        
+        # 状态投影层（用于点积注意力）
+        self.state_fusion_net = nn.Sequential(
+            nn.Linear(108, n_state_dim),
+            nn.ReLU(),
+            nn.Linear(n_state_dim, n_state_dim),
+            nn.LayerNorm(n_state_dim)
+        )
+
 
         # 固定动作编码器
         self.fixed_action_net = nn.Sequential(
@@ -49,8 +106,7 @@ class Actor(nn.Module):
         # 高效的注意力评分网络（双线性形式）
         self.attention = nn.Bilinear(n_state_dim, n_state_dim, 1, bias=False)
         
-        # 状态投影层（用于点积注意力）
-        self.state_proj = nn.Linear(n_state_dim, n_state_dim)
+        
 
         # 垫牌动作编码器
         self.action_discard_encoder = nn.Sequential(
@@ -103,20 +159,27 @@ class Actor(nn.Module):
 
     def forward(self, obs_x, actions_fixed, actions_discard) -> Tensor:
         #出牌方位为调整为以自己为0号位
-        play_history_fea = self.cards_restnet(obs_x['history'])#历史出牌
-        lstm_out, (h_n, _) = self.lstm(play_history_fea)
+        play_card_history_feat = obs_x['history_play_card']#历史出牌
+        play_seat_history_feat = obs_x['history_seat']#出牌座位号
+        play_team_history_feat = obs_x['history_team']#出牌阵营
 
-        hand_cards = obs_x['hand_cards']#我的手牌
-        curr_play_cards = obs_x['curr_play_cards']#当前轮已出牌
-        last_play_cards = obs_x['last_play_cards']#上一轮出牌        
-        played_cards = obs_x['played_cards']#已经出过的牌
-        level = obs_x['level']#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
-        score = obs_x['score']#当前得分，庄家从80分算起，当闲家得到80分时得分为0，超过80分时得分为负数；闲家从-80分算起，得到80分时得分为0，超过80分时得分为正数，用一副扑克表示（5,10，k）[2,14,4]
-        remain_score = obs_x['remain_score']#场面剩余分数，用两副扑克表示（5,10，k）[2,14,4]
+        play_history_feat = self.player_encoder(play_card_history_feat, play_seat_history_feat, play_team_history_feat)
+        lstm_out, (h_n, _) = self.lstm(play_history_feat)
         
-        cards = t.cat([hand_cards,  curr_play_cards, last_play_cards, played_cards, level, score, remain_score], dim=1)
-        cards_feat = self.cards_restnet(cards)
-        state_feat = t.cat[cards_feat, lstm_out]
+        own_seat = t.zeros(4)
+        own_seat[obs_x['seat']-1]=1#我的座位号
+        hand_cards = obs_x['hand_cards']#我的手牌
+        curr_play_cards_feat =  self.player_encoder(obs_x['curr_play_card'], obs_x['curr_play_seat'], obs_x['curr_play_team'])#当前轮的出牌特征
+        last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
+        played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
+        level_cards = obs_x['level'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
+        score_cards = obs_x['score'].unsqueeze(0)#当前得分，庄家从80分算起，当闲家得到80分时得分为0，超过80分时得分为负数；闲家从-80分算起，得到80分时得分为0，超过80分时得分为正数，用一副扑克表示（5,10，k）[2,14,4]
+        remain_score_cards = obs_x['remain_score'].unsqueeze(0)#场面剩余分数牌，用两副扑克表示（5,10，k）[2,14,4]
+        combined = t.cat([played_cards, level_cards, score_cards, remain_score_cards], dim=0)
+        combined_feat = self.cards_restnet(combined)#联合计算，提高速度
+        
+        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_play_cards_feat, last_play_cards_feat, combined_feat], dim=1)
+        state_feat = self.state_fusion_net(fusion_feat)
 
         #通过obs_feat场面信息+actions_fixed+actions_discard预测actions_discard中每张牌的出牌概率
         # actions_fixed_feat = self.cards_restnet(actions_fixed)
@@ -130,7 +193,7 @@ class Actor(nn.Module):
 
         discard_action_prob = t.empty(actions_discard.shape)
         #以 固定组合动作牌+状态 作为输入，预测剩余待选择牌中每张牌被选择为垫牌的概率，可采用注意力机制
-        for i in range(actions_fixed.shape[1]):
+        for i in range(actions_fixed.shape[0]):
             comb_feat = t.cat([state_feat, actions_fixed[i, :, :, :], actions_discard], 1) #[b, n_channels, w, h]
             comb_feat = self.cards_restnet(comb_feat)
             # 融合特征处理
@@ -558,3 +621,12 @@ class PPOClip(nn.Module):
                     break
             print(f"ep:{ep} reward:{current_episode_reward}")
 
+
+
+
+class PlayModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def load_checkpoint(self):
+        pass

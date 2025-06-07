@@ -240,14 +240,21 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
 
         #发牌阶段的回放经验
         bid_buff = []
+        inning_bid_buff = []
         #埋牌阶段的回放经验
         cover_buff = []
+        inning_cover_buff = []
+        
+        #出牌阶段
+        history_playcards = {}#partner, rival
+        round_obs_x_buff = []#每一回合的状态空间
+        round_play_cards = []#一回合中的出牌过程
 
         env.reset()
 
         while True:
             response = []
-            while not env.isFinalRound():
+            while True:
                 env.step(response)
                 
                 err = env.getError()
@@ -272,7 +279,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                         agent_output = actor.biddingMajor(deal_card, hold_cards, bid_card, own_pos, called_list, major, level)
                     response = [own_pos, agent_output]
                     if len(agent_output)>0:
-                        bid_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
+                        inning_bid_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
                    
 
 
@@ -287,8 +294,9 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     agent_output = actor.coverCard(publiccard, hold_cards, major, level)
                     response = [banker, agent_output]
                     if len(agent_output)>0:
-                        cover_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
-                    
+                        inning_cover_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
+                
+                #出牌阶段
                 elif stage == "play":
                     history = env.getPlayHistory()
                     history_curr = history[1]
@@ -296,8 +304,25 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     level = env.getLevel()                    
                     out_cards = env.playCard(history_curr, hold, level)
                     
+                    #历史出牌分3部分，出牌，出牌座位号，阵营
+
                     response = [env.getPlayerPosition(), out_cards]
-                    
+
+                #一局结束
+                elif stage == 'roundend':
+                    score = env.getRoundScore()
+
+                    response = None
+                    pass
+
+                #结束
+                elif stage == 'finish':
+                    bid_buff.append(inning_bid_buff)
+                    inning_bid_buff = []
+                    cover_buff.append(inning_cover_buff)
+                    inning_cover_buff = []
+
+
 
 
                     
