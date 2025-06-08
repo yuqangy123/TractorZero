@@ -230,17 +230,14 @@ def cards2matrix(list_cards, level=12, major=None):
     matrix = np.transpose(matrix, (0,2,1))
 
     # 根据级数调整列顺序数组
-    new_order = list(range(matrix.shape[2]))
+    # new_order = list(range(matrix.shape[2]))
     level = __CARDSCALE__.index(level)
     if level != 12:
-        # new_order.remove(level)
-        # new_order.insert(12, level)
-        # matrix = matrix[:, :, new_order]
         matrix[:,:,[12,level]] = matrix[:,:,[level,12]]
 
     # 根据主花色调整行序列数组
     if major and major != 0:
-        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+        matrix[:, [0,major], :] = matrix[:, [major,0], :]
     return matrix
 
 def matrix2card(mat, level=12, major=None):
@@ -251,7 +248,7 @@ def matrix2card(mat, level=12, major=None):
         mat[:,:,[12,level]] = mat[:,:,[level,12]]
 
     if major and major != 0:
-        mat[:, [0,major], 0:13] = mat[:, [major,0], 0:13]
+        mat[:, [0,major], :] = mat[:, [major,0], :]
 
     cards = mat.flatten()
     cards = cards[0:52] + cards[54:106]

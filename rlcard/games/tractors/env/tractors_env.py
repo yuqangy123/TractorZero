@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from rlcard.games.tractors.env import tractors_game as Game
-from rlcard.tractors.utils import *
+from rlcard.games.tractors.utils import *
 
 class TractorsEnv(Game):
     ''' tractor Environment
@@ -246,14 +246,29 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         inning_cover_buff = []
         
         #出牌阶段
-        history_playcards = {}#partner, rival
-        round_obs_x_buff = []#每一回合的状态空间
-        round_play_cards = []#一回合中的出牌过程
+        play_card_history_buff = []#[seat, cards]
+        play_team_history_buff = [[],[],[],[]]#partner:1, rival:2
+        
+        round_play_card = None
+        round_play_seat = None
+        round_play_team = [[],[],[],[]]
 
-        env.reset()
+        mat_level_card = None#极牌的矩阵
+        mat_score_card = None#当前捡分的牌的矩阵
+        mat_remain_score_card = None#剩余分的牌的矩阵
 
         while True:
             response = []
+            env.reset()
+            #新一局开始
+            level_card = env.Pokers2Num([s + '5' for s in __SUITSET__],[])
+            level_card.extend([c+54 for c in level_card])
+            mat_level_card = cards2matrix(level_card)
+            mat_score_card = cards2matrix([])
+            mat_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
+            mat_remain_score_card = env.Pokers2Num(mat_remain_score_card,[])
+            mat_remain_score_card.extend([c+54 for c in mat_remain_score_card])
+            
             while True:
                 env.step(response)
                 
@@ -299,30 +314,76 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                 #出牌阶段
                 elif stage == "play":
                     history = env.getPlayHistory()
-                    history_curr = history[1]
-                    hold = env.getPlayerHoldCards(env.getPlayerPosition())
-                    level = env.getLevel()                    
-                    out_cards = env.playCard(history_curr, hold, level)
+                    seat = env.getPlayerPosition()
+                    round_play_card = history[1]
+                    round_play_seat = history[0]
+                    round_play_team[seat] = [(seat==hseat or seat==(hseat+2)%4) and 1 or 2 for hseat in history[0]]
+                    hand_cards = env.getPlayerHoldCards(seat)
+                    level = env.getLevel()
+                    score = env.getTotalScore()
+                    remain_score = 200-score
+                    banker_seat = env.getBanker()
+                    
+                    fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , level)
+                    
+                    obs_x = {}
+                    obs_x['history_play_card'] = play_card_history_buff[0]#历史出牌
+                    obs_x['history_play_seat'] = play_card_history_buff[1]#出牌座位号
+                    obs_x['history_play_team'] = play_team_history_buff[seat]#出牌阵营
+                    obs_x['seat'] = seat
+                    obs_x['hand_cards'] = hand_cards
+                    obs_x['round_play_card'] = round_play_card
+                    obs_x['round_play_seat'] = round_play_seat
+                    obs_x['round_play_team'] = round_play_team
+                    obs_x['played_cards'] = played_cards
+                    obs_x['level'] = mat_level_card
+                    obs_x['score'] = mat_score_card
+                    obs_x['remain_score'] = mat_remain_score_card
+                    mat_action_card = actor.coverCard(obs_x, fixed_action_card, discard_action_card, discard_num, banker_seat==seat or banker_seat==(seat+2)%4)
+                    matrix2card(mat_action_card, )
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
+                    response = [env.getPlayerPosition(), legal_actions]
 
-                    response = [env.getPlayerPosition(), out_cards]
+                    #记录经验回放
+                    
 
-                #一局结束
+                #一回合结束
                 elif stage == 'roundend':
+                    #更新经验回放
                     score = env.getRoundScore()
+                    his = env.getHistory()
+                    #出牌历史，包括出的牌、出牌玩家位置
+                    play_card_history_buff.append(his)
+                    #出牌阵营
+                    if his[1][0]==0 or his[1][0]==2:
+                        play_team_history_buff[0].append([1,2,1,2])
+                        play_team_history_buff[2].append([1,2,1,2])
+                        play_team_history_buff[1].append([2,1,2,1])
+                        play_team_history_buff[3].append([2,1,2,1])
+                    else:
+                        play_team_history_buff[1].append([1,2,1,2])
+                        play_team_history_buff[3].append([1,2,1,2])
+                        play_team_history_buff[0].append([2,1,2,1])
+                        play_team_history_buff[2].append([2,1,2,1])
+                    #更新捡到的分牌
+                    mat_score_card
+                    #更新剩余的分牌                    
+                    mat_remain_score_card
+                    
 
                     response = None
-                    pass
+                    
 
                 #结束
                 elif stage == 'finish':
-                    bid_buff.append(inning_bid_buff)
-                    inning_bid_buff = []
-                    cover_buff.append(inning_cover_buff)
-                    inning_cover_buff = []
-
-
+                    #极牌转化为矩阵
+                    lv = env.getLevel()
+                    level_card = env.Pokers2Num([s + lv for s in __SUITSET__],[])
+                    level_card.extend([c+54 for c in level_card])
+                    mat_level_card = cards2matrix(level_card)
+                    response = None
+                    
 
 
                     

@@ -43,6 +43,8 @@ class PlayerEncoder(nn.Module):
     
     def forward(self, hand_matrix, seat_id, team_id):
         b = hand_matrix.shape[0]#batch
+        if b == 0:
+            return t.zeros(0, self.output_dim)
 
         # 提取手牌特征
         hand_card_feat = self.cards_restnet(hand_matrix)
@@ -160,16 +162,16 @@ class Actor(nn.Module):
     def forward(self, obs_x, actions_fixed, actions_discard) -> Tensor:
         #出牌方位为调整为以自己为0号位
         play_card_history_feat = obs_x['history_play_card']#历史出牌
-        play_seat_history_feat = obs_x['history_seat']#出牌座位号
-        play_team_history_feat = obs_x['history_team']#出牌阵营
+        play_seat_history_feat = obs_x['history_play_seat']#出牌座位号
+        play_team_history_feat = obs_x['history_play_team']#出牌阵营
 
         play_history_feat = self.player_encoder(play_card_history_feat, play_seat_history_feat, play_team_history_feat)
         lstm_out, (h_n, _) = self.lstm(play_history_feat)
         
         own_seat = t.zeros(4)
-        own_seat[obs_x['seat']-1]=1#我的座位号
+        own_seat[obs_x['seat']]=1#我的座位号
         hand_cards = obs_x['hand_cards']#我的手牌
-        curr_play_cards_feat =  self.player_encoder(obs_x['curr_play_card'], obs_x['curr_play_seat'], obs_x['curr_play_team'])#当前轮的出牌特征
+        curr_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
         last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
         played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
         level_cards = obs_x['level'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
