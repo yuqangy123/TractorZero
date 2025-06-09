@@ -248,10 +248,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         #出牌阶段
         play_card_history_buff = []#[seat, cards]
         play_team_history_buff = [[],[],[],[]]#partner:1, rival:2
-        
-        round_play_card = None
-        round_play_seat = None
-        round_play_team = [[],[],[],[]]
+        obs_x_buff = [{},{},{},{}]
+        reward_buff = [0,0,0,0]
 
         mat_level_card = None#极牌的矩阵
         mat_score_card = None#当前捡分的牌的矩阵
@@ -263,11 +261,12 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
             #新一局开始
             level_card = env.Pokers2Num([s + '5' for s in __SUITSET__],[])
             level_card.extend([c+54 for c in level_card])
-            mat_level_card = cards2matrix(level_card)
+            mat_level_card = cards2matrix(level_card, env)
             mat_score_card = cards2matrix([])
             mat_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
             mat_remain_score_card = env.Pokers2Num(mat_remain_score_card,[])
             mat_remain_score_card.extend([c+54 for c in mat_remain_score_card])
+            mat_remain_score_card = cards2matrix(mat_remain_score_card)
             
             while True:
                 env.step(response)
@@ -317,7 +316,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     seat = env.getPlayerPosition()
                     round_play_card = history[1]
                     round_play_seat = history[0]
-                    round_play_team[seat] = [(seat==hseat or seat==(hseat+2)%4) and 1 or 2 for hseat in history[0]]
+                    round_play_team = [(seat==hseat or seat==(hseat+2)%4) and 1 or 2 for hseat in history[0]]
                     hand_cards = env.getPlayerHoldCards(seat)
                     level = env.getLevel()
                     score = env.getTotalScore()
@@ -327,33 +326,41 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , level)
                     
                     obs_x = {}
-                    obs_x['history_play_card'] = play_card_history_buff[0]#历史出牌
-                    obs_x['history_play_seat'] = play_card_history_buff[1]#出牌座位号
-                    obs_x['history_play_team'] = play_team_history_buff[seat]#出牌阵营
+                    obs_x['history_play_card'] = np.copy(play_card_history_buff[0])#历史出牌
+                    obs_x['history_play_seat'] = np.copy(play_card_history_buff[1])#出牌座位号
+                    obs_x['history_play_team'] = np.copy(play_team_history_buff[seat])#出牌阵营
                     obs_x['seat'] = seat
                     obs_x['hand_cards'] = hand_cards
                     obs_x['round_play_card'] = round_play_card
                     obs_x['round_play_seat'] = round_play_seat
                     obs_x['round_play_team'] = round_play_team
                     obs_x['played_cards'] = played_cards
-                    obs_x['level'] = mat_level_card
-                    obs_x['score'] = mat_score_card
+                    obs_x['level'] = np.copy(mat_level_card)
+                    obs_x['score'] = np.copy(mat_score_card)
                     obs_x['remain_score'] = mat_remain_score_card
-                    mat_action_card = actor.coverCard(obs_x, fixed_action_card, discard_action_card, discard_num, banker_seat==seat or banker_seat==(seat+2)%4)
-                    matrix2card(mat_action_card, )
+                    mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, banker_seat==seat or banker_seat==(seat+2)%4)
+                    action = matrix2card(mat_action_card, level)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
-                    response = [env.getPlayerPosition(), legal_actions]
+                    response = [env.getPlayerPosition(), action]
 
                     #记录经验回放
-                    
+                    obs_x_buff[seat] = obs_x
 
                 #一回合结束
                 elif stage == 'roundend':
                     #更新经验回放
                     score = env.getRoundScore()
+                    banker_seat = env.getBanker()
+                    reward_buff = [0,0,0,0]
+                    if banker_seat == 0 or banker_seat == 2:
+                        reward_buff = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
+                    else:
+                        reward_buff = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
+
+                    
+                    #更新出牌历史，包括出的牌、出牌玩家位置
                     his = env.getHistory()
-                    #出牌历史，包括出的牌、出牌玩家位置
                     play_card_history_buff.append(his)
                     #出牌阵营
                     if his[1][0]==0 or his[1][0]==2:

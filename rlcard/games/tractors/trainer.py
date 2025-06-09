@@ -94,14 +94,18 @@ def create_buffers(flags, device_iterator):
         for position in ['banker', 'player']:#庄家 闲家
             state_dim = 319 if position == 'banker' else 430#状态维度
             specs = dict(
-                done=dict(size=(T,), dtype=torch.bool),
-                rewards=dict(size=(T,), dtype=torch.float32),
-                states=dict(size=(T, state_dim), dtype=torch.int8),
-                action=dict(size=(T,), dtype=torch.float32),
-                log_probs=dict(size=(T,), dtype=torch.float32),
-                values=dict(size=(T,), dtype=torch.float32),
-                discounted_rewards=dict(size=(T,), dtype=torch.float32),
-                advantages=dict(size=(T,), dtype=torch.float32),
+                history_play_card=dict(size=(T,2*4*14), dtype=torch.float),
+                history_play_seat=dict(size=(T, 4), dtype=torch.int8),
+                history_play_team=dict(size=(T, 4), dtype=torch.int8),
+                seat=dict(size=(T, 4), dtype=torch.int8),
+                # done=dict(size=(T,), dtype=torch.bool),
+                # rewards=dict(size=(T,), dtype=torch.float32),
+                # states=dict(size=(T, state_dim), dtype=torch.int8),
+                # action=dict(size=(T,), dtype=torch.float32),
+                # log_probs=dict(size=(T,), dtype=torch.float32),
+                # values=dict(size=(T,), dtype=torch.float32),
+                # discounted_rewards=dict(size=(T,), dtype=torch.float32),
+                # advantages=dict(size=(T,), dtype=torch.float32),
             )
             _buffers: Buffers = {key: [] for key in specs}
             for _ in range(flags.num_buffers):
