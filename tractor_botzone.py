@@ -42,12 +42,11 @@ class tractorGame():
         self.globalInfo = {} # 未确定主花色前为空
         
         self.step_count = -1 # 一局里面的步数, -1是未在对局中
-        self.curr_alloc = [[] for _ in range(__PLAYER_COUNT__)] # 每位玩家手牌
-        self.round_score = [0 for _ in range(__PLAYER_COUNT__)] # 玩家的局分数
+        self.player_hand_cards = [[] for _ in range(__PLAYER_COUNT__)] # 每位玩家手牌
+        self.player_played_cards = [[] for _ in range(__PLAYER_COUNT__)] # 各玩家已经出过的牌
         self.player_level = ['2' for _ in range(__PLAYER_COUNT__)] # 各玩家当前的级数
+        self.round_score = [0 for _ in range(__PLAYER_COUNT__)] # 玩家的局分数
         self.pointorder = copy.deepcopy(__POINT__)
-        self.played_cards = [[] for _ in range(__PLAYER_COUNT__)] # 各玩家已经出过的牌
-        self.playercard_history = deque(maxlen=15)
         self.logs = []
         self.erro_code = 0
         self._final_ended = False
@@ -1054,7 +1053,7 @@ class tractorGame():
                 new_lv_index = index + up_level_step
                 if new_lv_index >= len(__POINT__):
                     self.globalInfo["level"] = __POINT__[len(__POINT__)-1]
-                    self.globalInfo["stage"] = 'finish'
+                    self.globalInfo["stage"] = 'finalend'
                     break
                 new_lv_index = min(new_lv_index, len(__POINT__)-1)
                 
@@ -1067,7 +1066,7 @@ class tractorGame():
                 new_lv_index = index + up_level_step
                 if new_lv_index >= len(__POINT__):
                     self.globalInfo["level"] = __POINT__[len(__POINT__)-1]
-                    self.globalInfo["stage"] = 'finish'
+                    self.globalInfo["stage"] = 'finalend'
                     break
                     
                 new_lv_index = min(new_lv_index, len(__POINT__)-1)
@@ -1086,7 +1085,7 @@ class tractorGame():
 
     #获取玩家手牌
     def getPlayerHoldCards(self, pos):
-        return copy.deepcopy(self.curr_alloc[pos])
+        return copy.deepcopy(self.player_hand_cards[pos])
     
     #获取当前叫的主的花色
     def getMajor(self):
@@ -1142,9 +1141,19 @@ class tractorGame():
     def getPlayerPosition(self):
         return self.globalInfo["playerpos"]
     
-    #获取出牌历史
-    def getLastHistory(self):
-        return self.globalInfo["last_history"]
+    #获取上一轮出牌历史
+    def getLastRoundPlayHistory(self):
+        return self.globalInfo["history"][0]
+    #获取上一轮的赢家位置
+    def getLastRoundWin(self):
+        return self.globalInfo["history"][2]
+    #获取当前轮出牌历史
+    def getCurrRoundPlayHistory(self):
+        return self.globalInfo["history"][1]
+    #获取当前轮的出牌人
+    def getCurrRoundFirstPlaySeat(self):
+        return self.globalInfo["history"][3]
+    
 
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机；可选单牌）
     #play_poker 已出牌, 整型    
@@ -1696,7 +1705,7 @@ class tractorGame():
                 self.globalInfo["allocation"] = initdata["allocation"]
                 self.globalInfo["seed"] = initdata["seed"]
                 self.globalInfo["publiccard"] = initdata["publiccard"]
-                
+                self.globalInfo['playedcard'] = []#已出牌
                 
                 
                 
@@ -1723,8 +1732,8 @@ class tractorGame():
                 self.globalInfo["banking"] = banking
                 self.globalInfo["playerpos"] = first
                 
-                self.curr_alloc = [[] for _ in range(__PLAYER_COUNT__)]
-                self.curr_alloc[first].append(allocation[first][0])
+                self.player_hand_cards = [[] for _ in range(__PLAYER_COUNT__)]
+                self.player_hand_cards[first].append(allocation[first][0])
                 
             elif self.step_count <= 200: # 仍在发牌中，回合199是该阶段玩家最后一次反馈（lenLog = 200
                 eventpoker = []
@@ -1737,7 +1746,7 @@ class tractorGame():
                 repo = response[1] or [] # 这里有所改动，若玩家报主只需要发送报牌，若不报发送空列表[]即可
                 if len(repo) > 0:
                     for poker in repo:
-                        if poker not in self.curr_alloc[currplayer]:                            
+                        if poker not in self.player_hand_cards[currplayer]:                            
                             self.setError(currplayer, "NOT_YOUR_POKER")
                     eventpoker = repo
                     new_ = True
@@ -1776,7 +1785,7 @@ class tractorGame():
                     self.globalInfo["deliver"] = [allocation[player][self.step_count // (__PLAYER_COUNT__*2)]]
                     self.globalInfo["playerpos"] = player
                     
-                    self.curr_alloc[player].extend(self.globalInfo["deliver"])
+                    self.player_hand_cards[player].extend(self.globalInfo["deliver"])
                     self.step_count += 1
             
             elif self.step_count == 201: # 第101回合，庄家返回盖底牌
@@ -1798,13 +1807,12 @@ class tractorGame():
                         self.setError(currplayer, "NOT_YOUR_POKER")
                     big_hold.remove(pok)
                 
-                self.curr_alloc[currplayer] = big_hold
+                self.player_hand_cards[currplayer] = big_hold
                 self.globalInfo["publiccard"] = repo#更新压的底牌
 
                 # 仍然给庄家发request
                 self.globalInfo["stage"] = "play"
-                self.globalInfo["last_history"] = [[],[], currplayer, currplayer]
-                self.globalInfo["history"] = []
+                self.globalInfo["history"] = [[],[], currplayer, currplayer]
                 self.globalInfo["total_score"] = 0
                 
 
@@ -1828,7 +1836,7 @@ class tractorGame():
                     #move = response[str(player)]["response"] 
                     # 由于甩牌有失败的可能性，这里必须使用记录的history恢复局面
                     player_prov = int(list(request["output"]["content"].keys())[0])
-                    hist_prov = request["output"]["content"][str(player_prov)]["last_history"]
+                    hist_prov = request["output"]["content"][str(player_prov)]["history"]
                     if len(hist_prov[1]) > 0:
                         move = hist_prov[1][-1] #此处功能未测试
                         player = (player_prov-1) % 4
@@ -1842,6 +1850,8 @@ class tractorGame():
                 #print("recover: Normal")
 
                 # latest_response = full_input["log"][-1]
+                if None == response:
+                    pass
                 currplayer = response[0]
                 curr_move = response[1]
                 # if type(curr_move) is not list:
@@ -1849,19 +1859,19 @@ class tractorGame():
                 # if len(curr_move) == 0:
                 #     self.setError(currplayer, "INVALID_MOVE")
                 # latest_request = full_input["log"][-2]
-                history = self.globalInfo["last_history"]
+                history = self.globalInfo["history"]
                 for pok in curr_move:
-                    if pok not in self.curr_alloc[currplayer]:
+                    if pok not in self.player_hand_cards[currplayer]:
                         self.setError(currplayer, "NOT_YOUR_POKER")
                 play_move = [self.num2Poker(p) for p in curr_move]
-                outpok = self.checkLegalMove(play_move, self.globalInfo["level"], major, currplayer, history[1], self.curr_alloc, banker)
+                outpok = self.checkLegalMove(play_move, self.globalInfo["level"], major, currplayer, history[1], self.player_hand_cards, banker)
                 # collect history
                 outid = []
                 for pok in outpok:
-                    id = self.Poker2Num(pok, self.curr_alloc[currplayer])
+                    id = self.Poker2Num(pok, self.player_hand_cards[currplayer])
                     outid.append(id)
-                    self.curr_alloc[currplayer].remove(id)
-                    # del self.curr_alloc[currplayer][self.curr_alloc[currplayer].index(id)]
+                    self.player_hand_cards[currplayer].remove(id)
+                    # del self.player_hand_cards[currplayer][self.player_hand_cards[currplayer].index(id)]
                 
                 #print("move: Normal")
 
@@ -1872,7 +1882,7 @@ class tractorGame():
                 if len(new_history) < 3:
                     nextplayer = (currplayer + 1) % __PLAYER_COUNT__
                 new_history.append(outid)
-                self.played_cards[currplayer].extend(outid)
+                self.player_played_cards[currplayer].extend(outid)
                 old_history = history[0]
             
                 if len(new_history) == 4: # 本回合为该轮最后一次出牌
@@ -1882,9 +1892,8 @@ class tractorGame():
                     new_history = []
                     history[2] = history[3] + 0
                     history[3] = winner
-                    self.playercard_history.append(old_history)
 
-                    if len(self.curr_alloc[currplayer]) == 0: # 本局结束
+                    if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
                         # 扣底
                         if self.checkPokerType(history[1][0], self.globalInfo["level"]) != "suspect":
                             mult = len(history[1][0])
@@ -1914,25 +1923,19 @@ class tractorGame():
                         self.globalInfo["stage"] = "finish"
                         return self.__EndRound__()
 
-                self.displayContent = {
-                            "event": {
-                                "currplayer": currplayer,
-                                "action": "play",
-                                "poker": outid
-                            },
-                            "self.get_score": self.get_score
-                        }
-                if self.get_score != 0: # 非终止回合出现分数变动，说明甩牌失败
-                    self.displayContent["punished"] = True
-                new_score = old_score + self.get_score#get_score为负数就是罚分
-                self.globalInfo["total_score"] = new_score
-                if new_score < 0:#test code
-                    pass
+                
+                    if self.get_score != 0: # 非终止回合出现分数变动，说明甩牌失败
+                        pass
+                    new_score = old_score + self.get_score#get_score为负数就是罚分
+                    self.globalInfo["total_score"] = new_score
+                    if new_score < 0:#test code
+                        pass
+
                 history[0] = old_history
                 history[1] = new_history
+                self.globalInfo["history"] = history
                 self.globalInfo["playerpos"] = nextplayer
-                self.globalInfo["stage"] = "play"
-                self.globalInfo["last_history"] = history
+                self.globalInfo["stage"] = len(new_history)==0 and "roundend" or "play"
 
         except Exception as e:
             traceback.print_exc()
@@ -1943,19 +1946,18 @@ class tractorGame():
     def __EndRound__(self):
         self.step_count = -1
 
-    def isEndRound(self):
+    #小局结束
+    def isInningEnd(self):
         return self.step_count == -1
     
-    def isFinalRound(self):
-        return self.globalInfo["stage"] == 'finish'
+    #大局结束
+    def isFinalEnd(self):
+        return self.globalInfo["stage"] == 'finalend'
      
     
     def getPlayedCards(self):
-        return self.played_cards
-    
-    def getPlayedCardHistory(self):
-        return list(self.playercard_history)
-    
+        return self.player_played_cards
+        
 
 __MAX_ACTION_NUM__ = 0
 def run(env):
@@ -1974,9 +1976,8 @@ def run(env):
         publiccard = env.getPublicCards()
         hold = env.getPlayerHoldCards(env.getBanker())
         response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
-    elif stage == "play":
-        history = env.getLastHistory()
-        history_curr = history[1]
+    elif stage == "play" or stage == "roundend":
+        history_curr = env.getCurrRoundPlayHistory()
         hold = env.getPlayerHoldCards(env.getPlayerPosition())
         
         
@@ -2000,7 +2001,7 @@ def runGame():
         response = None     
         while True:
             env.step(response)
-            if env.isFinalRound():
+            if env.isFinalEnd():
                 # print(env.globalInfo)
                 break
             response = run(env)

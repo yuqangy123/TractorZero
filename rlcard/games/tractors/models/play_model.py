@@ -174,9 +174,9 @@ class Actor(nn.Module):
         curr_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
         last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
         played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
-        level_cards = obs_x['level'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
-        score_cards = obs_x['score'].unsqueeze(0)#当前得分，庄家从80分算起，当闲家得到80分时得分为0，超过80分时得分为负数；闲家从-80分算起，得到80分时得分为0，超过80分时得分为正数，用一副扑克表示（5,10，k）[2,14,4]
-        remain_score_cards = obs_x['remain_score'].unsqueeze(0)#场面剩余分数牌，用两副扑克表示（5,10，k）[2,14,4]
+        level_cards = obs_x['level_card'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
+        score_cards = obs_x['score_card'].unsqueeze(0)#当前得分，庄家从80分算起，当闲家得到80分时得分为0，超过80分时得分为负数；闲家从-80分算起，得到80分时得分为0，超过80分时得分为正数，用一副扑克表示（5,10，k）[2,14,4]
+        remain_score_cards = obs_x['remain_score_card'].unsqueeze(0)#场面剩余分数牌，用两副扑克表示（5,10，k）[2,14,4]
         combined = t.cat([played_cards, level_cards, score_cards, remain_score_cards], dim=0)
         combined_feat = self.cards_restnet(combined)#联合计算，提高速度
         
