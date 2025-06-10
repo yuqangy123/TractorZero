@@ -246,13 +246,15 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         inning_cover_buff = []
         
         #出牌阶段
-        play_card_history = []#[seat, cards]
+        play_card_history = [[],[]]#[seat, cards]
         play_team_history = [[],[],[],[]]#partner:1, rival:2
         
 
         round_obs_x_buff = [{},{},{},{}]
         round_reward_buff = [0,0,0,0]
         round_play_seat = [0,0,0,0]
+        inning_major = None
+        inning_level = None
 
         mat_level_card = None#极牌的矩阵
         mat_score_card = None#当前捡分的牌的矩阵
@@ -264,15 +266,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
             
             #新一局开始
             env.reset()
-            level_card = env.Pokers2Num([s + '5' for s in __SUITSET__],[])
-            level_card.extend([c+54 for c in level_card])
-            mat_level_card = cards2matrix(level_card, env)
-            mat_score_card = cards2matrix([])
-            mat_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
-            mat_remain_score_card = env.Pokers2Num(mat_remain_score_card,[])
-            mat_remain_score_card.extend([c+54 for c in mat_remain_score_card])
-            mat_remain_score_card = cards2matrix(mat_remain_score_card)
-            mat_played_card = cards2matrix([])
+            
             
             while True:
                 env.step(response)
@@ -308,14 +302,26 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     publiccard = env.getPublicCards()
                     banker = env.getBanker()
                     hold_cards = env.getPlayerHoldCards(banker)
-                    major = env.getMajor()
-                    level = env.getLevel()
+                    inning_major = env.getMajor()
+                    inning_level = env.getLevel()
                     #self, public_card, hold_card, own_seat, bid_history, level, major
-                    agent_output = actor.coverCard(publiccard, hold_cards, major, level)
+                    agent_output = actor.coverCard(publiccard, hold_cards, inning_major, inning_level)
                     response = [banker, agent_output]
                     if len(agent_output)>0:
-                        inning_cover_buff = [level, deal_card, called_list, own_pos, hold_cards, major, agent_output]
-                
+                        inning_cover_buff = [inning_level, deal_card, called_list, own_pos, hold_cards, inning_major, agent_output]
+                    
+                    #更新对局缓存信息
+                    level_card = env.Pokers2Num([s + '5' for s in __SUITSET__],[])
+                    level_card.extend([c+54 for c in level_card])
+                    mat_level_card = cards2matrix(level_card, inning_level, inning_major)
+                    mat_score_card = cards2matrix([], inning_level, inning_major)
+                    mat_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
+                    mat_remain_score_card = env.Pokers2Num(mat_remain_score_card,[])
+                    mat_remain_score_card.extend([c+54 for c in mat_remain_score_card])
+                    mat_remain_score_card = cards2matrix(mat_remain_score_card, inning_level, inning_major)
+                    mat_played_card = cards2matrix([], inning_level, inning_major)
+
+
                 #出牌阶段
                 elif stage == "play":
                     history = env.getPlayHistory()
@@ -355,7 +361,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                 #一回合结束
                 elif stage == 'roundend':
                     #存储经验回放
-                    score = env.getRoundScore()
+                    score = env.getLastRoundScore()
+                    score_pok = env.getLastRoundScorePoke()
                     banker_seat = env.getBanker()
                     round_reward_buff = [0,0,0,0]
                     if banker_seat == 0 or banker_seat == 2:
@@ -364,14 +371,14 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                         round_reward_buff = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
                     
 
-                    
-
                     #更新出牌历史，包括出的牌、出牌玩家位置
-                    his = env.getHistory()
-                    play_card_history.append(his)
-                    mat_played_card
+                    his_play_card = env.getLastRoundPlayHistory()
+                    his_play_seat = env.getLastRoundPlaySeat()
+                    play_card_history[0].append(cards2matrix(his_play_card, inning_level, inning_major))
+                    play_card_history[1].append([(banker_seat+s)%__PLAYER_COUNT__ for s in range(__PLAYER_COUNT__)])
+                    mat_played_card += play_card_history[0][-1]
                     #出牌阵营
-                    if his[1][0]==0 or his[1][0]==2:
+                    if his_play_seat==0 or his_play_seat==2:
                         play_team_history[0].append([1,2,1,2])
                         play_team_history[2].append([1,2,1,2])
                         play_team_history[1].append([2,1,2,1])
@@ -382,7 +389,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                         play_team_history[0].append([2,1,2,1])
                         play_team_history[2].append([2,1,2,1])
                     #更新捡到的分牌
-                    mat_score_card
+                    mat_s = cards2matrix()
+                    mat_score_card +=
                     #更新剩余的分牌                    
                     mat_remain_score_card
                     round_play_seat = [0,0,0,0]
@@ -396,7 +404,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     lv = env.getLevel()
                     level_card = env.Pokers2Num([s + lv for s in __SUITSET__],[])
                     level_card.extend([c+54 for c in level_card])
-                    mat_level_card = cards2matrix(level_card)
+                    mat_level_card = cards2matrix(level_card,inning_level,inning_major)
                     response = None
                     
 

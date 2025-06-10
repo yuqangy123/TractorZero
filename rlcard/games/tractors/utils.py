@@ -193,8 +193,25 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
         print()
         raise e
 
+# level=11
+# major=3
+# matrix = np.arange(2*14*4, dtype=np.int8)
+# matrix = matrix.reshape(2, 4, 14)
+# matrix_cp = matrix.copy()
+# print(matrix)
+# view = matrix[:,:,level:-1]
+# view[:]=np.roll(view, shift=-1, axis=2)
+# print(matrix)
+# matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+# print(matrix)
+# view = matrix[:,:,level:-1]
+# view[:]=np.roll(view, shift=1, axis=2)
+# print(matrix)
+# matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+# print(matrix)
+# print(matrix == matrix_cp)
 #扑克牌(number)转矩阵
-def cards2matrix(list_cards, level=12, major=None):
+def cards2matrix(list_cards, level='K', major='s'):
     """
         'A','2','3','4','5','6','7','8','9','0','J','Q','K','o'
     s    0   0   0   0   0   0   0   0   0   0   0   0   0   1
@@ -219,7 +236,7 @@ def cards2matrix(list_cards, level=12, major=None):
     'J'    0   0   0   0
     'Q'    0   0   0   0
     'K'    0   0   0   0
-    'o'    0   0   0   0
+    'o'    1   1   0   0
     [2, 14, 4] 
     """
     matrix = np.zeros(54*2, dtype=np.int8)
@@ -233,22 +250,24 @@ def cards2matrix(list_cards, level=12, major=None):
     # new_order = list(range(matrix.shape[2]))
     level = __CARDSCALE__.index(level)
     if level != 12:
-        matrix[:,:,[12,level]] = matrix[:,:,[level,12]]
+        view = matrix[:,:,level:-1]
+        view[:]=np.roll(view, shift=-1, axis=2)
 
     # 根据主花色调整行序列数组
-    if major and major != 0:
-        matrix[:, [0,major], :] = matrix[:, [major,0], :]
+    major = __SUITSET__.index(major)
+    if major != 0:
+        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
     return matrix
 
-def matrix2card(mat, level=12, major=None):
+def matrix2card(mat, level='K', major='s'):
+    level = __CARDSCALE__.index(level)
     if level != 12:
-        # new_order.remove(level)
-        # new_order.insert(12, level)
-        # mat = mat[:, :, new_order]
-        mat[:,:,[12,level]] = mat[:,:,[level,12]]
+        view = mat[:,:,level:-1]
+        view[:]=np.roll(view, shift=1, axis=2)
 
-    if major and major != 0:
-        mat[:, [0,major], :] = mat[:, [major,0], :]
+    major = __SUITSET__.index(major)
+    if major != 0:
+        mat[:, [0,major], 0:13] = mat[:, [major,0], 0:13]
 
     cards = mat.flatten()
     cards = cards[0:52] + cards[54:106]

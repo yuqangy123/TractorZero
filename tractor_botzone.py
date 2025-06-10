@@ -39,6 +39,7 @@ class tractorGame():
         self.errored = [[] for _ in range(__PLAYER_COUNT__)]
         self.Major = copy.deepcopy(__MAJOR__)
         self.get_score = 0 # 闲家得分，每次step前清空一下该值
+        self.get_score_pok=[]# 得分牌，每次step前清空一下该值
         self.globalInfo = {} # 未确定主花色前为空
         
         self.step_count = -1 # 一局里面的步数, -1是未在对局中
@@ -866,12 +867,17 @@ class tractorGame():
         histo = history + []
         hist = [[self.num2Poker(p) for p in x] for x in histo]
         score = 0 
-        for move in hist:
-            for pok in move:
-                if pok[1] == "5":
+        
+        for his_cards in history:
+            for card in his_cards:
+                if (card>=16 and card<=19) or (card>=70 and card<=73):
                     score += 5
-                elif pok[1] == "0" or pok[1] == "K":
+                    self.get_score_pok.append(card)
+                elif (card>=36 and card<=39) or (card>=48 and card<=51) or (card>=90 and card<=93) or (card>=102 and card<=105):
                     score += 10
+                    self.get_score_pok.append(card)
+        
+
         win_seq = 0 # 获胜方在本轮行动中的顺位，默认为0
         win_move = hist[0] # 获胜方的出牌，默认为首次出牌
         tyfirst = self.checkPokerType(history[0], level)
@@ -1107,9 +1113,12 @@ class tractorGame():
     def getDeliver(self):
         return self.globalInfo["deliver"]
     
-    # 获取当前轮次的分数
-    def getScore(self):
+    # 获取上一轮次的分数
+    def getLastRoundScore(self):
         return self.get_score
+    def getLastRoundScorePoke(self):
+        return self.get_score>0 and self.get_score_pok or []
+    
     
     # 获取错误码
     def getErrorCode(self):
@@ -1144,14 +1153,14 @@ class tractorGame():
     #获取上一轮出牌历史
     def getLastRoundPlayHistory(self):
         return self.globalInfo["history"][0]
-    #获取上一轮的赢家位置
-    def getLastRoundWin(self):
+    #获取上一轮的首出牌人位置
+    def getLastRoundPlaySeat(self):
         return self.globalInfo["history"][2]
     #获取当前轮出牌历史
     def getCurrRoundPlayHistory(self):
         return self.globalInfo["history"][1]
-    #获取当前轮的出牌人
-    def getCurrRoundFirstPlaySeat(self):
+    #获取当前轮的首出牌人位置
+    def getCurrRoundPlaySeat(self):
         return self.globalInfo["history"][3]
     
 
@@ -1683,6 +1692,7 @@ class tractorGame():
     # global里包含了主花色、级牌、庄家（覆盖）、报主情况
     def step(self, response=None):
         self.get_score = 0
+        self.get_score_pok = []
         self.erro_code = 0
         self.step_count += 1
         
@@ -2005,7 +2015,10 @@ def runGame():
                 # print(env.globalInfo)
                 break
             response = run(env)
-                
+
+
+
+
 if __name__ == '__main__':
     matrix = np.arange(54*2, dtype=np.int8)
     arr = [0,2,4,8,52]
@@ -2039,3 +2052,4 @@ if __name__ == '__main__':
     for p in processes:
         p.join()
     pass
+

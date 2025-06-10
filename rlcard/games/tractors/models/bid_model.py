@@ -6,7 +6,7 @@ from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
 class BidModel(nn.Module):
     def __init__(self):
         super().__init__()
-        # [b, 2, 14, 4] 是手牌矩阵
+        
         self.resnet_my_card = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
         self.resnet_bid_card = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
         # self.lstm = nn.LSTM(162, 128, batch_first=True)
