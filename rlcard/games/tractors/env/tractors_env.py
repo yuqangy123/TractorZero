@@ -1,7 +1,7 @@
 from collections import Counter, OrderedDict
 import numpy as np
 import torch
-
+from itertools import chain
 from rlcard.games.tractors.env import tractors_game as Game
 from rlcard.games.tractors.utils import *
 
@@ -250,9 +250,13 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         play_team_history = [[],[],[],[]]#partner:1, rival:2
         
 
-        round_obs_x_buff = [{},{},{},{}]
-        round_reward_buff = [0,0,0,0]
-        round_play_seat = [0,0,0,0]
+        obs_x_buff = [{},{},{},{}]
+        reward_buff = [0,0,0]
+
+        round_play_seat = [0,0,0]
+        round_play_card = [0,0,0]
+        round_play_team = [0,0,0]
+
         inning_major = None
         inning_level = None
 
@@ -321,13 +325,14 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     mat_remain_score_card = cards2matrix(mat_remain_score_card, inning_level, inning_major)
                     mat_played_card = cards2matrix([], inning_level, inning_major)
 
+                    round_play_seat = [0,0,0]
+                    round_play_card = [0,0,0]
+                    round_play_team = [0,0,0]
 
                 #出牌阶段
                 elif stage == "play":
                     history = env.getPlayHistory()
                     seat = env.getPlayerPosition()
-                    round_play_card = env.getCurrRoundPlayHistory()
-                    round_play_team = [(seat==hseat or seat==(hseat+2)%4) and 1 or 2 for hseat in history[0]]
                     hand_cards = env.getPlayerHoldCards(seat)
                     level = env.getLevel()
                     score = env.getTotalScore()
@@ -349,14 +354,23 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     obs_x['level_card'] = np.copy(mat_level_card)
                     obs_x['score_card'] = np.copy(mat_score_card)
                     obs_x['remain_score_card'] = np.copy(mat_remain_score_card)
-                    mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, banker_seat==seat or banker_seat==(seat+2)%4)
+                    obs_x['banker'] = banker_seat==seat or banker_seat==(seat+2)%4
+                    mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['banker'])
                     action = matrix2card(mat_action_card, level)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
                     response = [env.getPlayerPosition(), action]
 
                     #记录经验回放
-                    round_obs_x_buff[seat] = obs_x
+                    obs_x_buff[seat] = obs_x
+
+                    #更新回合缓存
+                    fseat = env.getCurrRoundPlaySeat()
+                    rounds  = len(env.getCurrRoundPlayHistory())
+                    round_play_card[rounds] = cards2matrix(action,inning_level,inning_major)
+                    round_play_seat[rounds] = seat
+                    round_play_team[rounds] = (seat == fseat or (seat+2)%4 == fseat) and 1 or 2
+                    
 
                 #一回合结束
                 elif stage == 'roundend':
@@ -364,11 +378,12 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     score = env.getLastRoundScore()
                     score_pok = env.getLastRoundScorePoke()
                     banker_seat = env.getBanker()
-                    round_reward_buff = [0,0,0,0]
                     if banker_seat == 0 or banker_seat == 2:
-                        round_reward_buff = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
+                        reward_buff = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
                     else:
-                        round_reward_buff = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
+                        reward_buff = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
+                    
+                    obs_x_buff
                     
 
                     #更新出牌历史，包括出的牌、出牌玩家位置
@@ -389,12 +404,14 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                         play_team_history[0].append([2,1,2,1])
                         play_team_history[2].append([2,1,2,1])
                     #更新捡到的分牌
-                    mat_s = cards2matrix()
-                    mat_score_card +=
-                    #更新剩余的分牌                    
-                    mat_remain_score_card
-                    round_play_seat = [0,0,0,0]
+                    score_pok = env.getLastRoundScorePoke()
+                    mat_s = cards2matrix(score_pok, inning_level, inning_major)
+                    mat_score_card += mat_s                  
+                    mat_remain_score_card -= mat_s
 
+                    round_play_seat = [0,0,0]
+                    round_play_card = [0,0,0]
+                    round_play_team = [0,0,0]
                     response = None
                     
 
