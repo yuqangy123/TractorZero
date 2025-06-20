@@ -2018,7 +2018,6 @@ def runGame():
 
 
 
-
 if __name__ == '__main__':
     matrix = np.arange(54*2, dtype=np.int8)
     arr = [0,2,4,8,52]

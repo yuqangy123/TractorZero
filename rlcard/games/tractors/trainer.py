@@ -94,21 +94,26 @@ def create_buffers(flags, device_iterator):
         for position in ['banker', 'player']:#庄家 闲家
             state_dim = 319 if position == 'banker' else 430#状态维度
             specs = dict(
-                history_play_card=dict(size=(T,15,2*4*14), dtype=torch.float),
-                history_play_seat=dict(size=(T,15,4), dtype=torch.int8),
-                history_play_team=dict(size=(T,15,4), dtype=torch.int8),
-                point=dict(size=(T,15,), dtype=torch.int8),
-                seat=dict(size=(T, 4), dtype=torch.int8),
-                hand_cards=dict(size=(T,2*4*14), dtype=torch.float),
-                round_play_card=dict(size=(T,3,2*4*14), dtype=torch.float),
-                round_play_seat=dict(size=(T,3), dtype=torch.int8),
-                round_play_team=dict(size=(T,3), dtype=torch.int8),
+                #以下是场面信息，对所有玩家相同
+                history_play_card=dict(size=(T,15,4,2*4*14), dtype=torch.float),
+                history_play_seat=dict(size=(T,15,4,4), dtype=torch.int8),
+                history_play_team=dict(size=(T,15,4,4), dtype=torch.int8),
                 played_card=dict(size=(T,2*4*14), dtype=torch.float),
                 level_card=dict(size=(T,2*4*14), dtype=torch.float),
                 score_card=dict(size=(T,2*4*14), dtype=torch.float),
                 remain_score_card=dict(size=(T,2*4*14), dtype=torch.float),
-                reward=dict(size=(T,), dtype=torch.float32),
+                round_play_card=dict(size=(T,3,2*4*14), dtype=torch.float),
+                round_play_seat=dict(size=(T,3), dtype=torch.int8),
+                round_play_team=dict(size=(T,3), dtype=torch.int8),
+                
+
+                #以下是玩家个人信息，每个玩家不相同
+                # point=dict(size=(T,15,), dtype=torch.int8),
+                seat=dict(size=(T, 4), dtype=torch.int8),
+                hand_cards=dict(size=(T,2*4*14), dtype=torch.float),
                 banker=dict(size=(T,), dtype=torch.bool),
+                reward=dict(size=(T,), dtype=torch.float32),
+                
                 # done=dict(size=(T,), dtype=torch.bool),
                 # rewards=dict(size=(T,), dtype=torch.float32),
                 # states=dict(size=(T, state_dim), dtype=torch.int8),
