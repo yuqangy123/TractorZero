@@ -94,26 +94,26 @@ def create_buffers(flags, device_iterator):
         for position in ['banker', 'player']:#庄家 闲家
             state_dim = 319 if position == 'banker' else 430#状态维度
             specs = dict(
-                #以下是场面信息，对所有玩家相同
-                history_play_card=dict(size=(T,15,4,2*4*14), dtype=torch.float),
+                #以下是场面信息，每一回合中对所有玩家相同
+                history_play_card=dict(size=(T,15,4,2*4*14), dtype=torch.int8),
                 history_play_seat=dict(size=(T,15,4,4), dtype=torch.int8),
                 history_play_team=dict(size=(T,15,4,4), dtype=torch.int8),
-                played_card=dict(size=(T,2*4*14), dtype=torch.float),
-                level_card=dict(size=(T,2*4*14), dtype=torch.float),
-                score_card=dict(size=(T,2*4*14), dtype=torch.float),
-                remain_score_card=dict(size=(T,2*4*14), dtype=torch.float),
-                round_play_card=dict(size=(T,3,2*4*14), dtype=torch.float),
-                round_play_seat=dict(size=(T,3), dtype=torch.int8),
-                round_play_team=dict(size=(T,3), dtype=torch.int8),
-                
+                history_played_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_level_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_remain_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
 
-                #以下是玩家个人信息，每个玩家不相同
+                #每一回合范围内的每一步的场面信息，
+                round_play_card=dict(size=(T,4,2*4*14), dtype=torch.int8),
+                round_play_seat=dict(size=(T,4), dtype=torch.int8),
+                round_play_team=dict(size=(T,4), dtype=torch.int8),
                 # point=dict(size=(T,15,), dtype=torch.int8),
-                seat=dict(size=(T, 4), dtype=torch.int8),
-                hand_cards=dict(size=(T,2*4*14), dtype=torch.float),
-                banker=dict(size=(T,), dtype=torch.bool),
-                reward=dict(size=(T,), dtype=torch.float32),
-                
+                seat=dict(size=(T, 4, 4), dtype=torch.int8),
+                hand_cards=dict(size=(T, 4, 2*4*14), dtype=torch.float),
+                banker=dict(size=(T, 4, ), dtype=torch.bool),
+                player_remain_card_num=dict(size=(T, 4, 25), dtype=torch.int8),
+                reward=dict(size=(T,4, ), dtype=torch.float32),                
+                action=dict(size=(T,2*4*14), dtype=torch.int8),
                 # done=dict(size=(T,), dtype=torch.bool),
                 # rewards=dict(size=(T,), dtype=torch.float32),
                 # states=dict(size=(T, state_dim), dtype=torch.int8),

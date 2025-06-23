@@ -22,6 +22,7 @@ __MAJOR__ = ['jo', 'Jo']#小王 大王
 __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
 __PLAYER_COUNT__ = 4
 __CARDS_NUM__ = (54*2)
+__HAND_CARD_NUM__ = 25#手牌数量
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
@@ -283,6 +284,16 @@ def get_one_hot_array(num_left_cards, max_num_cards):
 
     return one_hot
 
+def get_full_hot_array(num_left_cards, max_num_cards):
+    """
+    A utility function to obtain one-hot endoding
+    """
+    one_hot = np.zeros(max_num_cards)
+    if num_left_cards>0 and num_left_cards<=max_num_cards:
+        one_hot[:num_left_cards] = 1
+
+    return one_hot
+
 
 
 def _action_seq_list2array(action_seq_list):
@@ -345,7 +356,9 @@ __all__ = [
     '__POINT__',
     "__PLAYER_COUNT__",
     "__CARDS_NUM__",
+    "__HAND_CARD_NUM__",
     "cards2matrix",
     "get_one_hot_array",
+    "get_full_hot_array",
     "matrix2card",
 ]

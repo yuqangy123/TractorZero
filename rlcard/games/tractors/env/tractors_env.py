@@ -249,17 +249,22 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         history_play_card_buff = []
         history_play_seat_buff = []
         history_play_team_buff = []
-        seat_buff = []
-        hand_cards_buff = []
+        history_played_card_buff = []
+        history_level_card_buff = []
+        history_score_card_buff = []
+        history_remain_score_card_buff = []
+        
         round_play_card_buff = []
         round_play_seat_buff = []
         round_play_team_buff = []
-        played_card_buff = []
-        level_card_buff = []
-        score_card_buff = []
-        remain_score_card_buff = []
-        reward_buff = []
+        seat_buff = []
+        hand_cards_buff = []
         banker_buff = []
+        player_remain_card_num_buff = []
+        reward_buff = []
+        action_buff = []
+        
+        
         
         #出牌阶段的缓存
         history_play_card = None
@@ -267,28 +272,24 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         history_play_team = None
          
 
-        input_x = [{},{},{},{}]
+        # input_x = [{},{},{},{}]
 
-        round_play_seat = [0,0,0]
-        round_play_card = [0,0,0]
-        round_play_team = [0,0,0]
+
+        round_player_remain_card_num = [0,0,0,0]
+
+        round_play_trajectory = {}
 
         inning_major = None
         inning_level = None
 
-        mat_level_card = None#极牌的矩阵
-        mat_score_card = None#当前捡分的牌的矩阵
-        mat_remain_score_card = None#剩余分的牌的矩阵
-        mat_played_card = None#当前局已出的牌的矩阵
 
-        
 
         while True:
             response = []
             
             #新一局开始
             env.reset()
-            
+            obs_x = {}
             
             while True:
                 env.step(response)
@@ -333,133 +334,146 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                         inning_cover_buff = [inning_level, deal_card, called_list, own_pos, hold_cards, inning_major, agent_output]
                     
                     #更新对局缓存信息
-                    level_card = env.Pokers2Num([s + '5' for s in __SUITSET__],[])
-                    level_card.extend([c+54 for c in level_card])
-                    mat_level_card = cards2matrix(level_card, inning_level, inning_major)
-                    mat_score_card = cards2matrix([], inning_level, inning_major)
-                    mat_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
-                    mat_remain_score_card = env.Pokers2Num(mat_remain_score_card,[])
-                    mat_remain_score_card.extend([c+54 for c in mat_remain_score_card])
-                    mat_remain_score_card = cards2matrix(mat_remain_score_card, inning_level, inning_major)
-                    mat_played_card = cards2matrix([], inning_level, inning_major)
+                    obs_x = {}
+                    history_level_card = cards2matrix([], inning_level, inning_major)
+                    history_level_card[:,0,:] = 1
+                    history_level_card[:,:,12] = 1
+                    history_level_card[:,0:2,13] = 1
+                    obs_x['level_card'] = history_level_card#历史级牌
+                    history_score_card = cards2matrix([], inning_level, inning_major)
+                    obs_x['score_card'] = history_score_card#历史分得分牌
+                    history_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
+                    history_remain_score_card = env.Pokers2Num(history_remain_score_card,[])
+                    history_remain_score_card.extend([c+54 for c in history_remain_score_card])
+                    obs_x['remain_score_card'] = cards2matrix(history_remain_score_card, inning_level, inning_major)#历史剩余分数牌
+                    obs_x['played_cards'] = cards2matrix([], inning_level, inning_major)#历史所有已出牌
 
-                    round_play_seat = [0,0,0]
-                    round_play_card = [0,0,0]
-                    round_play_team = [0,0,0]
 
-                    def_v = cards2matrix([], inning_level, inning_major)
-                    history_play_card = deque([def_v]*15, maxlen=15)
+                    round_play_card = np.zeros((__PLAYER_COUNT__,2*4*14))
+                    round_play_seat = np.zeros((__PLAYER_COUNT__,__PLAYER_COUNT__))
+                    round_play_team = np.zeros((__PLAYER_COUNT__,2))
+                    round_player_remain_card_num = np.ones(__PLAYER_COUNT__, __HAND_CARD_NUM__)
+
+                    def_v = np.zeros((__PLAYER_COUNT__,2*4*14))
+                    history_play_card = deque([def_v]*15, maxlen=15)                    
                     def_v = np.zeros((__PLAYER_COUNT__,__PLAYER_COUNT__))
-                    history_play_seat = deque([def_v]*15, maxlen=15)
-                    def_v = np.zeros((__PLAYER_COUNT__,__PLAYER_COUNT__))
+                    history_play_seat = deque([def_v]*15, maxlen=15)                    
+                    def_v = np.zeros((__PLAYER_COUNT__,2))
                     history_play_team = deque([def_v]*15, maxlen=15)
+
+                    round_play_trajectory = {'seat':[],'hand_cards':[],\
+                        'round_play_card':[],'round_play_seat':[],'round_play_team':[],\
+                            'player_remain_card_num':[],'banker':[],'action':[]}
 
                 #出牌阶段
                 elif stage == "play":
                     history = env.getPlayHistory()
                     seat = env.getPlayerPosition()
-                    hand_cards = env.getPlayerHoldCards(seat)
-                    level = env.getLevel()
+                    hand_cards = cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major)
                     score = env.getTotalScore()
                     remain_score = 200-score
                     banker_seat = env.getBanker()
                     
-                    fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , level)
+                    fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
                     
-                    obs_x = {}
                     obs_x['history_play_card'] = np.array(history_play_card)#历史出牌
-                    obs_x['history_play_seat'] = np.array(history_play_seat)#出牌座位号
+                    obs_x['history_play_seat'] = np.array(history_play_seat)#出牌出牌座位号
                     obs_x['history_play_team'] = np.array(history_play_team)#出牌阵营
+                    
                     obs_x['seat'] = seat
                     obs_x['hand_cards'] = hand_cards
                     obs_x['round_play_card'] = round_play_card
                     obs_x['round_play_seat'] = round_play_seat
-                    obs_x['round_play_team'] = round_play_team
-                    obs_x['played_cards'] = np.copy(mat_played_card)
-                    obs_x['level_card'] = np.copy(mat_level_card)
-                    obs_x['score_card'] = np.copy(mat_score_card)
-                    obs_x['remain_score_card'] = np.copy(mat_remain_score_card)
+                    obs_x['round_play_team'] = round_play_team                 
+                    obs_x['player_remain_card_num'] = round_player_remain_card_num
                     obs_x['banker'] = banker_seat==seat or banker_seat==(seat+2)%4
                     mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['banker'])
-                    action = matrix2card(mat_action_card, level)
+                    action = matrix2card(mat_action_card, inning_level, inning_major)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
                     response = [env.getPlayerPosition(), action]
 
                     #记录经验回放
-                    input_x[seat] = obs_x
+                    round_play_trajectory['seat'].append(seat)
+                    round_play_trajectory['hand_cards'].append(hand_cards)
+                    round_play_trajectory['round_play_card'].append(np.copy(round_play_card))
+                    round_play_trajectory['round_play_seat'].append(np.copy(round_play_seat))
+                    round_play_trajectory['round_play_team'].append(np.copy(round_play_team))
+                    round_play_trajectory['player_remain_card_num'].append(np.copy(round_player_remain_card_num))
+                    round_play_trajectory['banker'].append(obs_x['banker'])
+                    round_play_trajectory['action'].append(mat_action_card)
 
                     #更新回合缓存
                     fseat = env.getCurrRoundPlaySeat()
                     rounds  = len(env.getCurrRoundPlayHistory())
-                    round_play_card[rounds] = cards2matrix(action,inning_level,inning_major)
+                    round_play_card[rounds] = mat_action_card
                     round_play_seat[rounds] = seat
-                    round_play_team[rounds] = (seat == fseat or (seat+2)%4 == fseat) and 1 or 2
+                    round_play_team[rounds] = (seat == fseat or (seat+2)%4 == fseat) and np.array([1,0]) or np.array([0,1])
+                    round_player_remain_card_num[seat][len(env.getPlayerHoldCards(seat)):] = 0
+
+                    
                     
 
                 #一回合结束
                 elif stage == 'roundend':
-                    
-
-                    
-                    
-
-                    #更新出牌历史，包括出的牌、出牌玩家位置
-                    last_round_play = env.getLastRoundPlayHistory()
-                    last_round_seat = env.getLastRoundPlaySeat()
-                    round_play_his = np.array((__PLAYER_COUNT__,2*4*14))
-                    round_seat_his = np.array((__PLAYER_COUNT__,__PLAYER_COUNT__))
-                    round_team_his = np.array((__PLAYER_COUNT__,__PLAYER_COUNT__))
-                    for i, playcard in enumerate(last_round_play):
-                        play_card_mat = cards2matrix(playcard,inning_level,inning_major)
-                        round_play_his[i,:] = play_card_mat
-                        mat_played_card += play_card_mat
-                    history_play_card.append(round_play_his)
-                    
-                    for i in range(4):
-                        round_seat_his[i,:] = get_one_hot_array((last_round_seat+i)%__PLAYER_COUNT__, __PLAYER_COUNT__)
-                    history_play_seat.append(round_seat_his)
-
-                    #出牌阵营，奖励
-                    if last_round_seat==0 or last_round_seat==2:
-                        round_team_his[0,:]=np.array([1,2,1,2])
-                        round_team_his[2,:]=np.array([1,2,1,2])
-                        round_team_his[1,:]=np.array([2,1,2,1])
-                        round_team_his[3,:]=np.array([2,1,2,1])
-                        reward = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
-                    else:
-                        round_team_his[1,:]=np.array([1,2,1,2])
-                        round_team_his[3,:]=np.array([1,2,1,2])
-                        round_team_his[0,:]=np.array([2,1,2,1])
-                        round_team_his[2,:]=np.array([2,1,2,1])
-                        reward = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
-                    history_play_team.append(round_team_his)
-
-                    #更新捡到的分牌
-                    score_pok = env.getLastRoundScorePoke()
-                    mat_s = cards2matrix(score_pok, inning_level, inning_major)
-                    mat_score_card += mat_s
-                    mat_remain_score_card -= mat_s
-
-                    #重置当前回合信息
-                    round_play_seat = [0,0,0]
-                    round_play_card = [0,0,0]
-                    round_play_team = [0,0,0]
-                    response = None
-                    
-                    
                     #存储经验回放
                     history_play_card_buff.append(np.array(history_play_card))
                     history_play_seat_buff.append(np.array(history_play_seat))
                     history_play_team_buff.append(np.array(history_play_team))
-                    played_card_buff.append(mat_played_card)
-                    level_card_buff.append(mat_level_card)
-                    score_card_buff.append(mat_score_card)
-                    remain_score_card_buff.append(mat_remain_score_card)
-                    round_play_card_buff.append(round_play_his)
-                    round_play_seat_buff.append(round_seat_his)
-                    round_play_team_buff.append(round_team_his)
-                    # banker_buff.append(mat_banker)
+                    history_played_card_buff.append(obs_x['played_cards'].copy())
+                    history_level_card_buff.append(obs_x['level_card'].copy())
+                    history_score_card_buff.append(obs_x['score_card'].copy())
+                    history_remain_score_card_buff.append(obs_x['remain_score_card'].copy())
+
+                    round_play_card_buff.append(round_play_trajectory['round_play_card'])
+                    round_play_seat_buff.append(round_play_trajectory['round_play_seat'])
+                    round_play_team_buff.append(round_play_trajectory['round_play_team'])
+                    seat_buff.append(round_play_trajectory['seat'])
+                    hand_cards_buff.append(round_play_trajectory['hand_cards'])
+                    banker_buff.append(round_play_trajectory['banker'])
+                    player_remain_card_num_buff.append(round_play_trajectory['player_remain_card_num'])
+                    action_buff.append(round_play_trajectory['action'])
+
+
+                    #更新history历史信息，包括出的牌、出牌玩家位置
+                    last_round_seat = env.getLastRoundPlaySeat()
+                    round_play_his = np.array((__PLAYER_COUNT__,2*4*14))
+                    round_seat_his = np.array((__PLAYER_COUNT__,__PLAYER_COUNT__))
+                    round_team_his = np.array((__PLAYER_COUNT__,__PLAYER_COUNT__))
+                    for i in range(__PLAYER_COUNT__):
+                        round_play_his[i] = obs_x['play_card']
+                        round_seat_his[i] = obs_x['seat']
+                        round_team_his[i] = obs_x['banker'] and 1 or 2
+                        obs_x['played_cards'] += obs_x['play_card']
+                    history_play_card.append(round_play_his)
+                    history_play_seat.append(round_seat_his)
+                    history_play_team.append(round_team_his)
+
+                    #出牌阵营，奖励
+                    if last_round_seat==0 or last_round_seat==2:
+                        reward = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
+                    else:
+                        reward = score == 0 and [-1, 1, -1, 1] or [score/10, -score/10, score/10, -score/10]
+                    reward_buff.append(reward)
+
+                    #更新捡到的分牌和剩余的分牌
+                    score_pok = env.getLastRoundScorePoke()
+                    mat_s = cards2matrix(score_pok, inning_level, inning_major)
+                    obs_x['score_card'] += mat_s
+                    obs_x['remain_score_card'] -= mat_s
+
+
+                    #重置当前回合缓存信息
+                    round_play_card = np.zeros((__PLAYER_COUNT__,2*4*14))
+                    round_play_seat = np.zeros((__PLAYER_COUNT__,__PLAYER_COUNT__))
+                    round_play_team = np.zeros((__PLAYER_COUNT__,2))
+
+                    round_play_trajectory = {'seat':[],'hand_cards':[],\
+                        'round_play_card':[],'round_play_seat':[],'round_play_team':[],\
+                            'player_remain_card_num':[],'banker':[],'action':[]}
+                    
+                    response = None
+                    
 
                 #结束
                 elif stage == 'finish':
@@ -467,7 +481,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     lv = env.getLevel()
                     level_card = env.Pokers2Num([s + lv for s in __SUITSET__],[])
                     level_card.extend([c+54 for c in level_card])
-                    mat_level_card = cards2matrix(level_card,inning_level,inning_major)
+                    history_level_card = cards2matrix(level_card,inning_level,inning_major)
                     response = None
                     
 

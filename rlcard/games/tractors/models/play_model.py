@@ -41,7 +41,7 @@ class PlayerEncoder(nn.Module):
             nn.LeakyReLU(),
             nn.LayerNorm(self.output_dim))
     
-    def forward(self, hand_matrix, seat_id, team_id):
+    def forward(self, hand_matrix, seat_emb, team_emb):
         b = hand_matrix.shape[0]#batch
         if b == 0:
             return t.zeros(0, self.output_dim)
@@ -50,11 +50,11 @@ class PlayerEncoder(nn.Module):
         hand_card_feat = self.cards_restnet(hand_matrix)
         
         # 位置和阵营嵌入属性
-        seat_emb = t.zeros((b,4), device=seat_id.device)
-        # 使用 scatter_ 在 dim=1 上，按 seat_id-1 的索引赋值 1
-        seat_emb.scatter_(1, (seat_id - 1).long(), 1)
-        team_emb = t.zeros((b,2), device=team_id.device)
-        team_emb.scatter_(1, (team_id - 1).long(), 1)
+        # seat_emb = t.zeros((b,4), device=seat_id.device)
+        # # 使用 scatter_ 在 dim=1 上，按 seat_id-1 的索引赋值 1
+        # seat_emb.scatter_(1, (seat_id - 1).long(), 1)
+        # team_emb = t.zeros((b,2), device=team_id.device)
+        # team_emb.scatter_(1, (team_id - 1).long(), 1)
         
         # 融合特征
         combined = t.cat([hand_card_feat, seat_emb, team_emb], dim=1)
@@ -147,7 +147,25 @@ class Actor(nn.Module):
             nn.ReLU(),
             nn.BatchNorm2d(64)
         )
+
+        # 底牌预测模块
+        self.public_card_net = nn.Sequential(
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64)
+        )
         
+        # 底牌概率预测头
+        self.pro_public_card_head = nn.Sequential(
+            nn.Conv2d(64, 32, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 2, kernel_size=1),
+            nn.Sigmoid()
+        )
+
         # 概率预测头
         self.probability_head = nn.Sequential(
             nn.Conv2d(64, 32, kernel_size=1),
@@ -168,10 +186,9 @@ class Actor(nn.Module):
         play_history_feat = self.player_encoder(play_card_history_feat, play_seat_history_feat, play_team_history_feat)
         lstm_out, (h_n, _) = self.lstm(play_history_feat)
         
-        own_seat = t.zeros(4)
-        own_seat[obs_x['seat']]=1#我的座位号
+        own_seat = obs_x['seat']#我的座位号
         hand_cards = obs_x['hand_cards']#我的手牌
-        curr_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
+        curr_round_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
         last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
         played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
         level_cards = obs_x['level_card'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
@@ -180,7 +197,26 @@ class Actor(nn.Module):
         combined = t.cat([played_cards, level_cards, score_cards, remain_score_cards], dim=0)
         combined_feat = self.cards_restnet(combined)#联合计算，提高速度
         
-        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_play_cards_feat, last_play_cards_feat, combined_feat], dim=1)
+        #预测八张底牌
+        remain_cards = played_cards.clone().detach()
+        for card_mat in obs_x['round_play_card']:
+            remain_cards += card_mat.deatch()
+        remain_cards = 1-remain_cards
+        remain_cards[:, 2:3, :] = 0
+        public_card_feat = t.cat([remain_cards, hand_cards, play_history_feat, curr_round_play_cards_feat], dim=0)
+        public_card_feat = self.cards_restnet(public_card_feat)
+        upsampled = F.interpolate(public_card_feat, size=(14, 4), mode='bilinear', align_corners=False)
+        probability = self.pro_public_card_head(upsampled)
+        probability_each_publiccard = probability*remain_cards
+        
+        # distribution_publiccard = Categorical(probability_each_publiccard)
+        pre_publiccard = t.multinomial(probability_each_publiccard, num_samples=8, replacement=False)#无放回采样
+        # log_probs_publiccard = distribution_publiccard.log_prob(pre_publiccard).sum(-1)# [batch_size, k]
+        # entropy_publiccard = distribution_publiccard.entropy().sum(-1)
+        pre_publiccard = pre_publiccard.detach()
+
+        #融合状态特征
+        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_round_play_cards_feat, last_play_cards_feat, combined_feat], dim=1)
         state_feat = self.state_fusion_net(fusion_feat)
 
         #通过obs_feat场面信息+actions_fixed+actions_discard预测actions_discard中每张牌的出牌概率
@@ -195,6 +231,7 @@ class Actor(nn.Module):
 
         discard_action_prob = t.empty(actions_discard.shape)
         #以 固定组合动作牌+状态 作为输入，预测剩余待选择牌中每张牌被选择为垫牌的概率，可采用注意力机制
+        card_count = obs_x['round_play_card'][-1].sum()
         for i in range(actions_fixed.shape[0]):
             comb_feat = t.cat([state_feat, actions_fixed[i, :, :, :], actions_discard], 1) #[b, n_channels, w, h]
             comb_feat = self.cards_restnet(comb_feat)
@@ -208,7 +245,7 @@ class Actor(nn.Module):
             probability_each_card = probability*actions_discard
             discard_action_prob[i] = probability_each_card
 
-        return fixed_action_prob, discard_action_prob
+        return fixed_action_prob, discard_action_prob, pre_publiccard
 
     #PPO 中使用两个策略分布（一个选固定牌，一个选垫牌）组合成一个完整的动作，并进行训练更新
     
@@ -371,7 +408,7 @@ class PPOClip(nn.Module):
     # 实现“先选主动作（固定牌），再选辅动作（垫牌）”的 分层决策机制（Hierarchical Policy）
     def act(self, obs_x, actions_fixed, actions_discard, discard_num):
         # 获取两个动作的概率分布
-        actions_fixed_prob, discard_action_prob = self.actor(obs_x, actions_fixed, actions_discard)
+        actions_fixed_prob, discard_action_prob, pre_publiccard = self.actor(obs_x, actions_fixed, actions_discard)
         
         #Categorical 是 PyTorch 中用于建模离散分类分布的类。
         # Step 1: 选择固定牌型
@@ -386,10 +423,10 @@ class PPOClip(nn.Module):
         log_probs_discard = distribution_discard.log_prob(actions_discard).sum(-1)# [batch_size, k]
         actions_discard = actions_discard.detach()
         
-        # Step 3: 返回两个动作和总 log prob
+        # Step 3: 返回固定牌型动作，弃牌动作，log prob总和
         total_logprob = log_prob_fixed + log_probs_discard  # sum over multiple discards
 
-        return action_fixed, actions_discard[action_fixed], log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob.detach()
+        return action_fixed, actions_discard[action_fixed], pre_publiccard, log_prob_fixed.detach(), log_probs_discard.detach(), total_logprob.detach()
     
 
     
@@ -406,7 +443,7 @@ class PPOClip(nn.Module):
         # return action.detach(), action_logprob.detach()
     
     def evaluate(self, obs_x, actions_fixed, actions_discard, discard_num):
-        actions_fixed_prob, discard_action_prob = self.forward(obs_x, actions_fixed, actions_discard)
+        actions_fixed_prob, discard_action_prob, pre_publiccard, log_probs_publiccard, entropy_publiccard = self.forward(obs_x, actions_fixed, actions_discard)
 
         #固定组合牌
         distribution_fixed = Categorical(actions_fixed_prob)
