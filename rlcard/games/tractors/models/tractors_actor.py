@@ -82,8 +82,8 @@ class TractorsActor():
         cover_card = matrix2card(cover_card)
         return cover_card
 
-    def playCard(self, obs_x, actions_fixed, actions_discard, discard_num, is_banker):
-        if is_banker:
+    def playCard(self, obs_x, actions_fixed, actions_discard, discard_num, team, banker_seat):
+        if team==1:
             fixed_cards, display_cards,_,_,_ = self.__models['banker'].act(obs_x, actions_fixed, actions_discard, discard_num)
         else:
             fixed_cards, display_cards,_,_,_ = self.__models['player'].act(obs_x, actions_fixed, actions_discard, discard_num)

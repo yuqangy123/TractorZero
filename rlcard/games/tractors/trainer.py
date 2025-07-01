@@ -102,6 +102,8 @@ def create_buffers(flags, device_iterator):
                 history_level_card=dict(size=(T,2*4*14), dtype=torch.int8),
                 history_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
                 history_remain_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_banker=dict(size=(T, 2), dtype=torch.int8),
+                history_public_card=dict(size=(T,2*4*14), dtype=torch.int8),
 
                 #每一回合范围内的每一步的场面信息，
                 round_play_card=dict(size=(T,4,2*4*14), dtype=torch.int8),
@@ -109,11 +111,12 @@ def create_buffers(flags, device_iterator):
                 round_play_team=dict(size=(T,4), dtype=torch.int8),
                 # point=dict(size=(T,15,), dtype=torch.int8),
                 seat=dict(size=(T, 4, 4), dtype=torch.int8),
+                team=dict(size=(T, 4, 2), dtype=torch.int8),
                 hand_cards=dict(size=(T, 4, 2*4*14), dtype=torch.float),
-                banker=dict(size=(T, 4, ), dtype=torch.bool),
+                
                 player_remain_card_num=dict(size=(T, 4, 25), dtype=torch.int8),
                 reward=dict(size=(T,4, ), dtype=torch.float32),                
-                action=dict(size=(T,2*4*14), dtype=torch.int8),
+                action=dict(size=(T,4, 2*4*14), dtype=torch.int8),
                 # done=dict(size=(T,), dtype=torch.bool),
                 # rewards=dict(size=(T,), dtype=torch.float32),
                 # states=dict(size=(T, state_dim), dtype=torch.int8),

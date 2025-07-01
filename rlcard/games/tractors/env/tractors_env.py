@@ -223,7 +223,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
     data from the environment and send the data to buffer. It uses
     a free queue and full queue to syncup with the main process.
     """
-    positions = ['bid', 'conver', 'banker', 'player']
+    positions = ['bid', 'cover', 'banker', 'player']
     try:
         T = flags.unroll_length
         print('Device %s Actor %i started.', str(device), i)
@@ -253,17 +253,18 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
         history_level_card_buff = []
         history_score_card_buff = []
         history_remain_score_card_buff = []
-        
+        history_banker_buff = []
+        history_public_card_buff = []
+
         round_play_card_buff = []
         round_play_seat_buff = []
         round_play_team_buff = []
         seat_buff = []
-        hand_cards_buff = []
-        banker_buff = []
+        hand_cards_buff = []        
         player_remain_card_num_buff = []
         reward_buff = []
         action_buff = []
-        
+        team_buff = []
         
         
         #出牌阶段的缓存
@@ -347,6 +348,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     history_remain_score_card.extend([c+54 for c in history_remain_score_card])
                     obs_x['remain_score_card'] = cards2matrix(history_remain_score_card, inning_level, inning_major)#历史剩余分数牌
                     obs_x['played_cards'] = cards2matrix([], inning_level, inning_major)#历史所有已出牌
+                    obs_x['public_card'] = cards2matrix(agent_output, inning_level, inning_major)
+                    obs_x['banker'] = env.getBanker()
 
 
                     round_play_card = np.zeros((__PLAYER_COUNT__,2*4*14))
@@ -363,7 +366,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
 
                     round_play_trajectory = {'seat':[],'hand_cards':[],\
                         'round_play_card':[],'round_play_seat':[],'round_play_team':[],\
-                            'player_remain_card_num':[],'banker':[],'action':[]}
+                            'player_remain_card_num':[],'team':[],'action':[]}
 
                 #出牌阶段
                 elif stage == "play":
@@ -372,7 +375,6 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     hand_cards = cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major)
                     score = env.getTotalScore()
                     remain_score = 200-score
-                    banker_seat = env.getBanker()
                     
                     fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
                     
@@ -385,9 +387,9 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     obs_x['round_play_card'] = round_play_card
                     obs_x['round_play_seat'] = round_play_seat
                     obs_x['round_play_team'] = round_play_team                 
-                    obs_x['player_remain_card_num'] = round_player_remain_card_num
-                    obs_x['banker'] = banker_seat==seat or banker_seat==(seat+2)%4
-                    mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['banker'])
+                    obs_x['player_remain_card_num'] = round_player_remain_card_num                    
+                    obs_x['team'] = (obs_x['banker']==seat or obs_x['banker']==(seat+2)%4) and 1 or 2
+                    mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['team'], obs_x['banker'])
                     action = matrix2card(mat_action_card, inning_level, inning_major)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
@@ -400,7 +402,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     round_play_trajectory['round_play_seat'].append(np.copy(round_play_seat))
                     round_play_trajectory['round_play_team'].append(np.copy(round_play_team))
                     round_play_trajectory['player_remain_card_num'].append(np.copy(round_player_remain_card_num))
-                    round_play_trajectory['banker'].append(obs_x['banker'])
+                    round_play_trajectory['team'].append(obs_x['team'])
                     round_play_trajectory['action'].append(mat_action_card)
 
                     #更新回合缓存
@@ -416,7 +418,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
 
                 #一回合结束
                 elif stage == 'roundend':
-                    #存储经验回放
+                    #存储经验回放，
+                    #注意：banker庄家应该知道public card
                     history_play_card_buff.append(np.array(history_play_card))
                     history_play_seat_buff.append(np.array(history_play_seat))
                     history_play_team_buff.append(np.array(history_play_team))
@@ -424,13 +427,15 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     history_level_card_buff.append(obs_x['level_card'].copy())
                     history_score_card_buff.append(obs_x['score_card'].copy())
                     history_remain_score_card_buff.append(obs_x['remain_score_card'].copy())
+                    history_banker_buff.append(obs_x['banker'])
+                    history_public_card_buff.append(obs_x['public_card'])
 
                     round_play_card_buff.append(round_play_trajectory['round_play_card'])
                     round_play_seat_buff.append(round_play_trajectory['round_play_seat'])
                     round_play_team_buff.append(round_play_trajectory['round_play_team'])
                     seat_buff.append(round_play_trajectory['seat'])
                     hand_cards_buff.append(round_play_trajectory['hand_cards'])
-                    banker_buff.append(round_play_trajectory['banker'])
+                    team_buff.append(round_play_trajectory['team'])
                     player_remain_card_num_buff.append(round_play_trajectory['player_remain_card_num'])
                     action_buff.append(round_play_trajectory['action'])
 
@@ -470,7 +475,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
 
                     round_play_trajectory = {'seat':[],'hand_cards':[],\
                         'round_play_card':[],'round_play_seat':[],'round_play_team':[],\
-                            'player_remain_card_num':[],'banker':[],'action':[]}
+                            'player_remain_card_num':[],'team':[],'action':[]}
                     
                     response = None
                     

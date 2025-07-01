@@ -197,26 +197,32 @@ class Actor(nn.Module):
         combined = t.cat([played_cards, level_cards, score_cards, remain_score_cards], dim=0)
         combined_feat = self.cards_restnet(combined)#联合计算，提高速度
         
-        #预测八张底牌
-        remain_cards = played_cards.clone().detach()
-        for card_mat in obs_x['round_play_card']:
-            remain_cards += card_mat.deatch()
-        remain_cards = 1-remain_cards
-        remain_cards[:, 2:3, :] = 0
-        public_card_feat = t.cat([remain_cards, hand_cards, play_history_feat, curr_round_play_cards_feat], dim=0)
-        public_card_feat = self.cards_restnet(public_card_feat)
-        upsampled = F.interpolate(public_card_feat, size=(14, 4), mode='bilinear', align_corners=False)
-        probability = self.pro_public_card_head(upsampled)
-        probability_each_publiccard = probability*remain_cards
+        #预测八张底牌(n/25 * pre_public_card)
+        if obs_x['banker'] == own_seat:
+            pre_publiccard = obs_x['public_card']
+            public_card_feat = obs_x['public_card'].copy().unsqueeze(0)
+        else:
+            for card_mat in obs_x['round_play_card']:
+                remain_cards += card_mat.deatch()
+            remain_cards += hand_cards.detach()
+            remain_cards = 1-remain_cards
+            remain_cards[:, 2:3, :] = 0
+            public_card_feat = t.cat([remain_cards, play_history_feat, curr_round_play_cards_feat], dim=0)
+            public_card_feat = self.cards_restnet(public_card_feat)
+            upsampled = F.interpolate(public_card_feat, size=(14, 4), mode='bilinear', align_corners=False)
+            probability = self.pro_public_card_head(upsampled)
+            probability *= remain_cards
         
-        # distribution_publiccard = Categorical(probability_each_publiccard)
-        pre_publiccard = t.multinomial(probability_each_publiccard, num_samples=8, replacement=False)#无放回采样
-        # log_probs_publiccard = distribution_publiccard.log_prob(pre_publiccard).sum(-1)# [batch_size, k]
-        # entropy_publiccard = distribution_publiccard.entropy().sum(-1)
-        pre_publiccard = pre_publiccard.detach()
+            # distribution_publiccard = Categorical(probability)
+            public_card_feat = t.multinomial(probability, num_samples=8, replacement=False)#无放回采样
+            public_card_feat *= (1 - hand_cards.sum().detach()/25)#最多25张手牌
+            # log_probs_publiccard = distribution_publiccard.log_prob(pre_publiccard).sum(-1)# [batch_size, k]
+            # entropy_publiccard = distribution_publiccard.entropy().sum(-1)
+            pre_publiccard = public_card_feat.copy()
+            pre_publiccard[pre_publiccard > 0] = 1
 
         #融合状态特征
-        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_round_play_cards_feat, last_play_cards_feat, combined_feat], dim=1)
+        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_round_play_cards_feat, last_play_cards_feat, combined_feat, public_card_feat], dim=1)
         state_feat = self.state_fusion_net(fusion_feat)
 
         #通过obs_feat场面信息+actions_fixed+actions_discard预测actions_discard中每张牌的出牌概率
