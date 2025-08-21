@@ -1828,6 +1828,8 @@ class tractorGame():
 
             else: # 正式出牌（101回合开始, self.step_count=204）
                 # old_alloc = full_input["initdata"]["allocation"]
+                
+
                 banker = self.globalInfo["banking"]["banker"]
                 major = self.globalInfo["banking"]["major"]
                 # self.setMajor(major, self.globalInfo["level"])
@@ -1856,12 +1858,55 @@ class tractorGame():
                     
                     for pok in move:
                         new_alloc[player].remove(pok)'''
-                
-                #print("recover: Normal")
+                history = self.globalInfo["history"]
 
+                if self.globalInfo["stage"] == 'roundend':
+                    # 玩家无手牌，本局结束                
+                    if len(self.player_hand_cards[(history[3] - 1) % __PLAYER_COUNT__]) == 0:                     
+                        #history[1] 变为 history[0]
+                        history1 = history[0]
+                        #history[2] 为 currplayer
+                        currplayer = history[2]
+                        # history[3] 为 winner
+                        winner = history[3]
+
+                        # 扣底
+                        if self.checkPokerType(history1[0], self.globalInfo["level"]) != "suspect":
+                            mult = len(history1[0])
+                        else:
+                            divided, _ = self.checkThrow(history1[0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
+                            divided.sort(key=lambda x: len(x), reverse=True)
+                            if len(divided[0]) >= 4:
+                                mult = len(divided[0]) * 2
+                            elif len(divided[0]) == 2:
+                                mult = 4
+                            else: 
+                                mult = 2
+
+                        publicscore = 0
+                        for pok in self.globalInfo["publiccard"]: 
+                            p = self.num2Poker(pok)
+                            if p[1] == "5":
+                                publicscore += 5
+                            elif p[1] == "0" or p[1] == "K":
+                                publicscore += 10
+                        
+                        self.Reward(publicscore*mult, winner, banker)
+                        new_score = old_score + self.get_score
+                        endingScores = self.EndGame(banker, new_score)
+                        self.globalInfo["stage"] = "gameend"
+                        return self.__EndRound__()
+                    
+                    # 本轮结束，状态转换play
+                    else:
+                        self.globalInfo["stage"] = 'play'
+                        return
+                
+            
                 # latest_response = full_input["log"][-1]
                 if None == response:
-                    pass
+                    return
+                
                 currplayer = response[0]
                 curr_move = response[1]
                 # if type(curr_move) is not list:
@@ -1869,7 +1914,7 @@ class tractorGame():
                 # if len(curr_move) == 0:
                 #     self.setError(currplayer, "INVALID_MOVE")
                 # latest_request = full_input["log"][-2]
-                history = self.globalInfo["history"]
+                
                 for pok in curr_move:
                     if pok not in self.player_hand_cards[currplayer]:
                         self.setError(currplayer, "NOT_YOUR_POKER")
@@ -1903,40 +1948,44 @@ class tractorGame():
                     history[2] = history[3] + 0
                     history[3] = winner
 
-                    if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
-                        # 扣底
-                        if self.checkPokerType(history[1][0], self.globalInfo["level"]) != "suspect":
-                            mult = len(history[1][0])
-                        else:
-                            divided, _ = self.checkThrow(history[1][0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
-                            divided.sort(key=lambda x: len(x), reverse=True)
-                            if len(divided[0]) >= 4:
-                                mult = len(divided[0]) * 2
-                            elif len(divided[0]) == 2:
-                                mult = 4
-                            else: 
-                                mult = 2
+                    # if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
+                    #     # 扣底
+                    #     if self.checkPokerType(history[1][0], self.globalInfo["level"]) != "suspect":
+                    #         mult = len(history[1][0])
+                    #     else:
+                    #         divided, _ = self.checkThrow(history[1][0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
+                    #         divided.sort(key=lambda x: len(x), reverse=True)
+                    #         if len(divided[0]) >= 4:
+                    #             mult = len(divided[0]) * 2
+                    #         elif len(divided[0]) == 2:
+                    #             mult = 4
+                    #         else: 
+                    #             mult = 2
 
-                        publicscore = 0
-                        for pok in self.globalInfo["publiccard"]: 
-                            p = self.num2Poker(pok)
-                            if p[1] == "5":
-                                publicscore += 5
-                            elif p[1] == "0" or p[1] == "K":
-                                publicscore += 10
+                    #     publicscore = 0
+                    #     for pok in self.globalInfo["publiccard"]: 
+                    #         p = self.num2Poker(pok)
+                    #         if p[1] == "5":
+                    #             publicscore += 5
+                    #         elif p[1] == "0" or p[1] == "K":
+                    #             publicscore += 10
                         
-                        self.Reward(publicscore*mult, winner, banker)
-                        new_score = old_score + self.get_score
+                    #     self.Reward(publicscore*mult, winner, banker)
+                    #     new_score = old_score + self.get_score
 
-                        endingScores = self.EndGame(banker, new_score)
+                    #     endingScores = self.EndGame(banker, new_score)
                         
-                        self.globalInfo["stage"] = "finish"
-                        return self.__EndRound__()
+                    #     history[0] = old_history
+                    #     history[1] = new_history
+                    #     self.globalInfo["history"] = history
+                    #     self.globalInfo["playerpos"] = nextplayer
+                    #     self.globalInfo["stage"] = "finish"
+                    #     return self.__EndRound__()
 
                 
                     if self.get_score != 0: # 非终止回合出现分数变动，说明甩牌失败
                         pass
-                    new_score = old_score + self.get_score#get_score为负数就是罚分
+                    new_score = old_score + self.get_score# get_score 为负数就是罚分
                     self.globalInfo["total_score"] = new_score
                     if new_score < 0:#test code
                         pass
@@ -1974,9 +2023,7 @@ def run(env):
     response = None
     level = env.getLevel()
     stage = env.getStage()
-    if stage == "finish":
-        pass
-    elif stage == "deal":
+    if stage == "deal":
         get_card = env.getDeliver()[0]
         called = env.getCalled()
         snatched = env.getSnatched()        
@@ -1986,7 +2033,7 @@ def run(env):
         publiccard = env.getPublicCards()
         hold = env.getPlayerHoldCards(env.getBanker())
         response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
-    elif stage == "play" or stage == "roundend":
+    elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
         hold = env.getPlayerHoldCards(env.getPlayerPosition())
         
@@ -1995,12 +2042,16 @@ def run(env):
         if len(playedCards) == 0:#test code
             playedCards = env.getLegalPlayCard(history_curr, hold, level)
             pass
-        
+        playedCardscnt = len(playedCards)
         playedCards = playedCards[random.randint(0, len(playedCards)-1)]#test code
         if type(playedCards) is not list:#test code
             playedCards = env.getLegalPlayCard(history_curr, hold, level)
         response = [env.getPlayerPosition(), playedCards]
-    
+    elif stage == "roundend":
+        pass
+    elif stage == "finish":
+        pass
+
     return response
 
 def runGame():

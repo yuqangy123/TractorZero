@@ -373,9 +373,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     history = env.getPlayHistory()
                     seat = env.getPlayerPosition()
                     hand_cards = cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major)
-                    score = env.getTotalScore()
-                    remain_score = 200-score
-                    
+                                        
                     fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
                     
                     obs_x['history_play_card'] = np.array(history_play_card)#历史出牌
@@ -419,7 +417,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                 #一回合结束
                 elif stage == 'roundend':
                     #存储经验回放，
-                    #注意：banker庄家应该知道public card
+                    #注意：banker庄家应该知道 public card
                     history_play_card_buff.append(np.array(history_play_card))
                     history_play_seat_buff.append(np.array(history_play_seat))
                     history_play_team_buff.append(np.array(history_play_team))
@@ -455,6 +453,8 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     history_play_team.append(round_team_his)
 
                     #出牌阵营，奖励
+                    score = env.getLastRoundScore()
+                    remain_score = 200-score
                     if last_round_seat==0 or last_round_seat==2:
                         reward = score == 0 and [1, -1, 1, -1] or [-score/10, score/10, -score/10, score/10]
                     else:
@@ -481,7 +481,7 @@ def run(i, device, free_queue, full_queue, actor, buffers, flags):
                     
 
                 #结束
-                elif stage == 'finish':
+                elif stage == 'gameend':
                     #极牌转化为矩阵
                     lv = env.getLevel()
                     level_card = env.Pokers2Num([s + lv for s in __SUITSET__],[])
