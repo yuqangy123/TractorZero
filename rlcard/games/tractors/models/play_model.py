@@ -18,19 +18,19 @@ class PlayerEncoder(nn.Module):
     """
     玩家出牌信息特征编码器，用于表示历史出牌中或当前回合中玩家的出牌信息特征
     由手牌+座位号+阵营组成，座位号需转为以自己为1号位的本地座位号
-    hand_matrix: [batch, 2, 14, 4] 手牌矩阵
+    hand_matrix: [batch, 2, 4, 14] 手牌矩阵
     seat_id: [batch] 座位ID (1-4)
     team_id: [batch] 阵营ID (1或2，1为我方，2为敌方)
     经过融合层输出128维的特征向量
     """
     def __init__(self):
         super(PlayerEncoder, self).__init__()
-        cards_embed_dim=2*14*4
+        cards_embed_dim=2*4*14
         seat_embed_dim=4
         team_embed_dim=2
         self.output_dim = 128
         
-        # 手牌特征提取器 (2,14,4) -> 256维
+        # 手牌特征提取器 (2,4,14) -> 256维
         self.cards_restnet = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
         
         # 融合层
@@ -77,13 +77,13 @@ class Actor(nn.Module):
         '''
         状态编码器
         
-        历史出牌编码网络，只输入最近10回合的 历史出牌
+        历史出牌编码网络，只输入最近15回合的 历史出牌
         使用resnet提取出牌特征，再输入lstm提取出牌历史时序信息。
         这个网络设计有效结合了卷积神经网络的空间特征提取能力和循环神经网络的时序建模能力，
         特别适合处理像牌局序列这样具有时间依赖性的结构化数据。通过ResNet处理每个时间步的2D特征，再通过LSTM整合时序信息，模型能够捕捉牌局间的复杂动态关系。
 
         
-        '''        
+        '''
         self.cards_restnet = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
         self.player_encoder = PlayerEncoder()
         self.lstm = nn.LSTM(self.player_encoder.output_dim, 96, batch_first=True)
@@ -191,9 +191,9 @@ class Actor(nn.Module):
         curr_round_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
         last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
         played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
-        level_cards = obs_x['level_card'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,14,4]当前的级牌
+        level_cards = obs_x['level_card'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,4,14]当前的级牌
         score_cards = obs_x['score_card'].unsqueeze(0)#当前得分，庄家从80分算起，当闲家得到80分时得分为0，超过80分时得分为负数；闲家从-80分算起，得到80分时得分为0，超过80分时得分为正数，用一副扑克表示（5,10，k）[2,14,4]
-        remain_score_cards = obs_x['remain_score_card'].unsqueeze(0)#场面剩余分数牌，用两副扑克表示（5,10，k）[2,14,4]
+        remain_score_cards = obs_x['remain_score_card'].unsqueeze(0)#场面剩余分数牌，用两副扑克表示（5,10，k）[2,4,14]
         combined = t.cat([played_cards, level_cards, score_cards, remain_score_cards], dim=0)
         combined_feat = self.cards_restnet(combined)#联合计算，提高速度
         

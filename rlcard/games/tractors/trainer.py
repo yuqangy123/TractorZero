@@ -50,34 +50,40 @@ def create_buffers(flags, device_iterator):
 
     
 
-    buffer = {}
+    play_buffer, cover_buffer = {}
     for device in device_iterator:
-        buffer[device] = {}
+        play_buffer[device] = {}
+        cover_buffer[device] = {}
 
         #叫牌buffer obs_x, bid_card, left_num
-        state_dim = 319
-        specs = dict(
-            score=dict(size=(T,), dtype=torch.float32),
-            states=dict(size=(T, state_dim), dtype=torch.int8),
-            bid_card=dict(size=(T, 2,14,4), dtype=torch.int8),
-            left_num=dict(size=(T,), dtype=torch.float32),
-        )
-        _buffers: Buffers = {key: [] for key in specs}
-        for _ in range(flags.num_buffers):
-            for key in _buffers:
-                if not device == "cpu":
-                    _buffer = torch.empty(**specs[key]).to(torch.device('cuda:'+str(device))).share_memory_()
-                else:
-                    _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
-                _buffers[key].append(_buffer)
-        buffer[device]['bid'] = _buffers
+        # state_dim = 319
+        # specs = dict(
+        #     score=dict(size=(T,), dtype=torch.float32),
+        #     states=dict(size=(T, state_dim), dtype=torch.int8),
+        #     bid_card=dict(size=(T, 2,14,4), dtype=torch.int8),
+        #     left_num=dict(size=(T,), dtype=torch.float32),
+        # )
+        # _buffers: Buffers = {key: [] for key in specs}
+        # for _ in range(flags.num_buffers):
+        #     for key in _buffers:
+        #         if not device == "cpu":
+        #             _buffer = torch.empty(**specs[key]).to(torch.device('cuda:'+str(device))).share_memory_()
+        #         else:
+        #             _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
+        #         _buffers[key].append(_buffer)
+        # buffer[device]['bid'] = _buffers
 
         #埋底牌 own_cards, partner_bid_cards, rival_bid_cards
         specs = dict(
-            score=dict(size=(T,), dtype=torch.float32),
-            own_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
-            partner_bid_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
-            rival_bid_cards=dict(size=(T, 2,14,4), dtype=torch.int8),
+            cover_cards=dict(size=(T,2*4*14), dtype=torch.float32),
+            hand_cards=dict(size=(T, 2*4*14), dtype=torch.float),
+            partner_bid_card=dict(size=(T,3,2*4*14), dtype=torch.float32),
+            rival_bid_card=dict(size=(T,3,2*4*14), dtype=torch.float32),
+            # rival_bid_seat=dict(size=(T, 4), dtype=torch.float32),
+            level_cards=dict(size=(T,2*4*14), dtype=torch.float32),
+            # seat=dict(size=(T, 4), dtype=torch.int8),
+            # banker=dict(size=(T, 4), dtype=torch.int8),
+            reward=dict(size=(T, ), dtype=torch.float32),
         )
         _buffers: Buffers = {key: [] for key in specs}
         for _ in range(flags.num_buffers):
@@ -87,7 +93,7 @@ def create_buffers(flags, device_iterator):
                 else:
                     _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
                 _buffers[key].append(_buffer)
-        buffer[device]['cover'] = _buffers
+        cover_buffer[device] = _buffers
 
     
         #出牌buffer
@@ -113,18 +119,11 @@ def create_buffers(flags, device_iterator):
                 seat=dict(size=(T, 4, 4), dtype=torch.int8),
                 team=dict(size=(T, 4, 2), dtype=torch.int8),
                 hand_cards=dict(size=(T, 4, 2*4*14), dtype=torch.float),
-                
                 player_remain_card_num=dict(size=(T, 4, 25), dtype=torch.int8),
-                reward=dict(size=(T,4, ), dtype=torch.float32),                
                 action=dict(size=(T,4, 2*4*14), dtype=torch.int8),
-                # done=dict(size=(T,), dtype=torch.bool),
-                # rewards=dict(size=(T,), dtype=torch.float32),
-                # states=dict(size=(T, state_dim), dtype=torch.int8),
-                # action=dict(size=(T,), dtype=torch.float32),
-                # log_probs=dict(size=(T,), dtype=torch.float32),
-                # values=dict(size=(T,), dtype=torch.float32),
-                # discounted_rewards=dict(size=(T,), dtype=torch.float32),
-                # advantages=dict(size=(T,), dtype=torch.float32),
+
+                #奖励信息
+                reward=dict(size=(T,4, ), dtype=torch.float32),
             )
             _buffers: Buffers = {key: [] for key in specs}
             for _ in range(flags.num_buffers):
@@ -134,10 +133,8 @@ def create_buffers(flags, device_iterator):
                     else:
                         _buffer = torch.empty(**specs[key]).to(torch.device('cpu')).share_memory_()
                     _buffers[key].append(_buffer)
-            buffer[device][position] = _buffers
-
-        
-    return buffer
+            play_buffer[device] = _buffers
+    return play_buffer, cover_buffer
 
 def get_batch(free_queue,
               full_queue,
@@ -234,19 +231,21 @@ def train(flags):
         actors[device] = model
 
     # Initialize buffers
-    buffers = create_buffers(flags, device_iterator)
+    play_buffer, cover_buffer = create_buffers(flags, device_iterator)
    
     # Initialize queues
     actor_processes = []
     ctx = mp.get_context('spawn')
-    free_queue = {}
-    full_queue = {}
+    play_free_queue = {}
+    play_full_queue = {}
+    cover_free_queue = {}
+    cover_full_queue = {}
         
     for device in device_iterator:
-        _free_queue = {'bid': ctx.SimpleQueue(), 'cover': ctx.SimpleQueue(), 'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
-        _full_queue = {'bid': ctx.SimpleQueue(), 'cover': ctx.SimpleQueue(), 'banker': ctx.SimpleQueue(), 'player': ctx.SimpleQueue()}
-        free_queue[device] = _free_queue
-        full_queue[device] = _full_queue
+        play_free_queue[device] = ctx.SimpleQueue()
+        play_full_queue[device] = ctx.SimpleQueue()
+        cover_free_queue[device] = ctx.SimpleQueue()
+        cover_full_queue[device] = ctx.SimpleQueue()
 
     # Learner model for training
     learner_playModel = tractorActor(device=device, flags=flags)
@@ -268,11 +267,11 @@ def train(flags):
         checkpoint_states = torch.load(
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
-        for k in ['bid', 'cover', 'banker', 'player']:
+        for k in ['cover', 'player']:
             assert learner_playModel.load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
             assert learner_playModel.load_optim_checkpoint(k, checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
-                actors[device].load_state_dict(k,checkpoint_states["model_state_dict"][k])
+                actors[device].load_state_dict(k, checkpoint_states["model_state_dict"][k])
         stats = checkpoint_states["stats"]
         frames = checkpoint_states["frames"]
         position_frames = checkpoint_states["position_frames"]
@@ -284,7 +283,7 @@ def train(flags):
         for i in range(flags.num_actors):
             actor_pro = ctx.Process(
                 target=run,
-                args=(i, device, free_queue[device], full_queue[device], actors[device], buffers[device], flags))
+                args=(i, device, actors[device], play_free_queue[device], play_full_queue[device], cover_free_queue[device], cover_full_queue[device], play_buffer[device], cover_buffer[device], flags))
             actor_pro.start()
             actor_processes.append(actor_pro)
 
@@ -306,14 +305,16 @@ def train(flags):
 
     for device in device_iterator:
         for m in range(flags.num_buffers):
-            free_queue[device]['banker'].put(m)
-            free_queue[device]['player'].put(m)
+            play_free_queue[device].put(m)
+            play_free_queue[device].put(m)
+            cover_free_queue[device].put(m)
+            cover_free_queue[device].put(m)
 
     threads = []
     locks = {}
     for device in device_iterator:
-        locks[device] = {'banker': threading.Lock(), 'player': threading.Lock()}
-    position_locks = {'banker': threading.Lock(), 'player': threading.Lock()}
+        locks[device] = {'cover': threading.Lock(), 'player': threading.Lock()}
+    position_locks = {'cover': threading.Lock(), 'player': threading.Lock()}
 
     for device in device_iterator:
         for i in range(flags.num_threads):

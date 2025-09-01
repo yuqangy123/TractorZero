@@ -16,8 +16,8 @@ from pathlib import Path
 from tractors.models.ppo_model import MLPActorCritic, MLPQNetwork
 from pyarrow import deserialize, serialize
 from utils import logger
-from rlcard.tractors.utils import *
-from rlcard.tractors.models.tractors_model import TractorsModel as Model
+# from rlcard.tractors.utils import *
+# from rlcard.tractors.models.tractors_model import TractorsModel as Model
 
 from rlcard.games.tractors.models.bid_model import BidModel
 from rlcard.games.tractors.models.cover_model import CoverModel

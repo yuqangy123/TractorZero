@@ -1842,65 +1842,52 @@ class tractorGame():
                 # new_alloc = copy.deepcopy(old_alloc) + []
                 # new_alloc[banker] = big_hold
                 
-                '''for turn_id in range(204, self.step_count - 1, 2): # 还原本轮手牌（刚刚接收到的一回合信息不处理）
-                    request = full_input["log"][turn_id]
-                    #player = int(list(response.keys())[0])
-                    #move = response[str(player)]["response"] 
-                    # 由于甩牌有失败的可能性，这里必须使用记录的history恢复局面
-                    player_prov = int(list(request["output"]["content"].keys())[0])
-                    hist_prov = request["output"]["content"][str(player_prov)]["history"]
-                    if len(hist_prov[1]) > 0:
-                        move = hist_prov[1][-1] #此处功能未测试
-                        player = (player_prov-1) % 4
-                    else:
-                        move = hist_prov[0][-1]
-                        player = (hist_prov[2]+3) % 4
-                    
-                    for pok in move:
-                        new_alloc[player].remove(pok)'''
                 history = self.globalInfo["history"]
 
+                #一轮结束
                 if self.globalInfo["stage"] == 'roundend':
-                    # 玩家无手牌，本局结束                
-                    if len(self.player_hand_cards[(history[3] - 1) % __PLAYER_COUNT__]) == 0:                     
-                        #history[1] 变为 history[0]
-                        history1 = history[0]
-                        #history[2] 为 currplayer
-                        currplayer = history[2]
-                        # history[3] 为 winner
-                        winner = history[3]
+                    self.globalInfo["stage"] = 'play'
+                    return
+                    # # 玩家无手牌，本局结束                
+                    # if len(self.player_hand_cards[(history[3] - 1) % __PLAYER_COUNT__]) == 0:                     
+                    #     #history[1] 变为 history[0]
+                    #     history1 = history[0]
+                    #     #history[2] 为 currplayer
+                    #     currplayer = history[2]
+                    #     # history[3] 为 winner
+                    #     winner = history[3]
 
-                        # 扣底
-                        if self.checkPokerType(history1[0], self.globalInfo["level"]) != "suspect":
-                            mult = len(history1[0])
-                        else:
-                            divided, _ = self.checkThrow(history1[0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
-                            divided.sort(key=lambda x: len(x), reverse=True)
-                            if len(divided[0]) >= 4:
-                                mult = len(divided[0]) * 2
-                            elif len(divided[0]) == 2:
-                                mult = 4
-                            else: 
-                                mult = 2
+                    #     # 扣底
+                    #     if self.checkPokerType(history1[0], self.globalInfo["level"]) != "suspect":
+                    #         mult = len(history1[0])
+                    #     else:
+                    #         divided, _ = self.checkThrow(history1[0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
+                    #         divided.sort(key=lambda x: len(x), reverse=True)
+                    #         if len(divided[0]) >= 4:
+                    #             mult = len(divided[0]) * 2
+                    #         elif len(divided[0]) == 2:
+                    #             mult = 4
+                    #         else: 
+                    #             mult = 2
 
-                        publicscore = 0
-                        for pok in self.globalInfo["publiccard"]: 
-                            p = self.num2Poker(pok)
-                            if p[1] == "5":
-                                publicscore += 5
-                            elif p[1] == "0" or p[1] == "K":
-                                publicscore += 10
+                    #     publicscore = 0
+                    #     for pok in self.globalInfo["publiccard"]: 
+                    #         p = self.num2Poker(pok)
+                    #         if p[1] == "5":
+                    #             publicscore += 5
+                    #         elif p[1] == "0" or p[1] == "K":
+                    #             publicscore += 10
                         
-                        self.Reward(publicscore*mult, winner, banker)
-                        new_score = old_score + self.get_score
-                        endingScores = self.EndGame(banker, new_score)
-                        self.globalInfo["stage"] = "gameend"
-                        return self.__EndRound__()
+                    #     self.Reward(publicscore*mult, winner, banker)
+                    #     new_score = old_score + self.get_score
+                    #     endingScores = self.EndGame(banker, new_score)
+                    #     self.globalInfo["stage"] = "gameend"
+                    #     return self.__EndRound__()
                     
-                    # 本轮结束，状态转换play
-                    else:
-                        self.globalInfo["stage"] = 'play'
-                        return
+                    # # 本轮结束，状态转换play
+                    # else:
+                    #     self.globalInfo["stage"] = 'play'
+                    #     return
                 
             
                 # latest_response = full_input["log"][-1]
@@ -1948,39 +1935,39 @@ class tractorGame():
                     history[2] = history[3] + 0
                     history[3] = winner
 
-                    # if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
-                    #     # 扣底
-                    #     if self.checkPokerType(history[1][0], self.globalInfo["level"]) != "suspect":
-                    #         mult = len(history[1][0])
-                    #     else:
-                    #         divided, _ = self.checkThrow(history[1][0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
-                    #         divided.sort(key=lambda x: len(x), reverse=True)
-                    #         if len(divided[0]) >= 4:
-                    #             mult = len(divided[0]) * 2
-                    #         elif len(divided[0]) == 2:
-                    #             mult = 4
-                    #         else: 
-                    #             mult = 2
+                    if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
+                        # 扣底
+                        if self.checkPokerType(history[1][0], self.globalInfo["level"]) != "suspect":
+                            mult = len(history[1][0])
+                        else:
+                            divided, _ = self.checkThrow(history[1][0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
+                            divided.sort(key=lambda x: len(x), reverse=True)
+                            if len(divided[0]) >= 4:
+                                mult = len(divided[0]) * 2
+                            elif len(divided[0]) == 2:
+                                mult = 4
+                            else: 
+                                mult = 2
 
-                    #     publicscore = 0
-                    #     for pok in self.globalInfo["publiccard"]: 
-                    #         p = self.num2Poker(pok)
-                    #         if p[1] == "5":
-                    #             publicscore += 5
-                    #         elif p[1] == "0" or p[1] == "K":
-                    #             publicscore += 10
+                        publicscore = 0
+                        for pok in self.globalInfo["publiccard"]: 
+                            p = self.num2Poker(pok)
+                            if p[1] == "5":
+                                publicscore += 5
+                            elif p[1] == "0" or p[1] == "K":
+                                publicscore += 10
                         
-                    #     self.Reward(publicscore*mult, winner, banker)
-                    #     new_score = old_score + self.get_score
+                        self.Reward(publicscore*mult, winner, banker)
+                        new_score = old_score + self.get_score
 
-                    #     endingScores = self.EndGame(banker, new_score)
+                        endingScores = self.EndGame(banker, new_score)
                         
-                    #     history[0] = old_history
-                    #     history[1] = new_history
-                    #     self.globalInfo["history"] = history
-                    #     self.globalInfo["playerpos"] = nextplayer
-                    #     self.globalInfo["stage"] = "finish"
-                    #     return self.__EndRound__()
+                        history[0] = old_history
+                        history[1] = new_history
+                        self.globalInfo["history"] = history
+                        self.globalInfo["playerpos"] = nextplayer
+                        self.globalInfo["stage"] = "gameend"
+                        return self.__EndRound__()
 
                 
                     if self.get_score != 0: # 非终止回合出现分数变动，说明甩牌失败
