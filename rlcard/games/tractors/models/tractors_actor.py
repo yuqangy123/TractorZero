@@ -31,7 +31,9 @@ class TractorsActor():
         self.__models = dict()
         self.__models['bid'] = BidModel(args).to(device)
         self.__models['cover'] = CoverModel(args).to(device)
-        self.__models['banker'] = PlayModel(args).to(device)
+
+        #不区分team
+        # self.__models['banker'] = PlayModel(args).to(device)
         self.__models['player'] = PlayModel(args).to(device)
         
 
@@ -83,11 +85,8 @@ class TractorsActor():
         return cover_card
 
     def playCard(self, obs_x, actions_fixed, actions_discard, discard_num, team, banker_seat):
-        if team==1:
-            fixed_cards, display_cards,_,_,_ = self.__models['banker'].act(obs_x, actions_fixed, actions_discard, discard_num)
-        else:
-            fixed_cards, display_cards,_,_,_ = self.__models['player'].act(obs_x, actions_fixed, actions_discard, discard_num)
-        
+        fixed_cards, display_cards,_,_,_ = self.__models['player'].act(obs_x, actions_fixed, actions_discard, discard_num, team)
+
         out_cards = fixed_cards + display_cards
         out_cards = matrix2card(out_cards)
         return out_cards
@@ -117,6 +116,6 @@ class TractorsActor():
         if model_name in self.__models:
             return self.__models[model_name].parameters()
     
-
+    
 if __name__ == '__main__':
     pass
