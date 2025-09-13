@@ -96,13 +96,16 @@ class TractorsActor():
             self.__models[model_name].load_checkpoint(dict)
             return True
         return False
-    
+        
     def load_optim_checkpoint(self, model_name, dict):
         if model_name in self.__models:
             self.__models[model_name].load_optim_checkpoint(dict)
             return True
         return False
     
+    def get_model(self, model_name):
+        if model_name in self.__models:
+            return self.__models[model_name]
     
     def share_memory(self):
         for name, model in self.__models.items():
