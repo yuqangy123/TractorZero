@@ -492,27 +492,26 @@ class tractorGame():
 
     #获取牌堆中所有符合牌型
     def getTypePoke(self, own_pok, level, type = ["single","pair","tractor", "suspect"]):        
-        rule_poks = []#poker格式
+        rule_poks = {tp:[] for tp in type}#poker格式
         
         # own_pok = ['d4','d4','d5','d5','d7','d7','d8','d8']#test
-        if 'suspect' not in type:
-            count = Counter(own_pok)
-            if 'single' in type:
-                rule_poks.extend([[p] for p in own_pok])
-                
-            if 'pair' in type:
-                for k, v in count.items():
-                    if v == 2:# and k != 'jo' and k != 'Jo':
-                        rule_poks.append([k,k])
-                        
-            if 'tractor' in type:
-                tr = self.parseTractorPoker(own_pok, level)
-                rule_poks.extend(tr)
+        
+        count = Counter(own_pok)
+        if 'single' in type:
+            rule_poks['single'].extend([[p] for p in own_pok])
+            
+        if 'pair' in type:
+            for k, v in count.items():
+                if v == 2:# and k != 'jo' and k != 'Jo':
+                    rule_poks['pair'].append([k,k])
+                    
+        if 'tractor' in type:
+            tr = self.parseTractorPoker(own_pok, level)
+            rule_poks['tractor'].extend(tr)
 
-        #甩牌的牌堆里肯定包含了单，对，连对
-        else:
+        if 'suspect' in type:
             tr = self.parseSuspectPoker(own_pok, level, self.globalInfo["banking"]["major"])
-            rule_poks.extend(tr)
+            rule_poks['suspect'].extend(tr)
 
         return rule_poks
     # 检查是否有可应手牌型
@@ -580,11 +579,11 @@ class tractorGame():
                             suc_flag = False
         return False
 
-    #play_pok不是甩牌牌型
+    #play_pok 不是甩牌牌型
     def checkResUnSuspect(self, play_pok, own_pok, level): # poker: list[int]
         poker_len = len(play_pok)
         suit = play_pok[0][0]
-        typoker = self.checkPokerType(play_pok, level)
+        # typoker = self.checkPokerType(play_pok, level)
         #出的是主牌
         if play_pok[0] in self.Major:
             major_pok = [pok for pok in own_pok if pok in self.Major]
@@ -596,6 +595,7 @@ class tractorGame():
                 for k,v in my_pok_count.items():
                     if v >= poker_len:
                         ret.append([k]*poker_len)
+
                 if len(major_pok) < poker_len:
                     unmajor_pok = [pok for pok in own_pok if pok not in major_pok]
                     ret = [major_pok+list(pok) for pok in list(combinations(unmajor_pok, poker_len-len(major_pok)))]
@@ -605,7 +605,8 @@ class tractorGame():
                 
             # 主牌拖拉机
             else: 
-                deck_Major = [pok for pok in own_pok if pok in self.Major]
+                # deck_Major = [pok for pok in own_pok if pok in self.Major]
+                deck_Major = major_pok
                 tractors = self.parseTractorPoker(deck_Major, level)
                 ret = [tractor for tractor in tractors if len(tractor) == poker_len]
 
@@ -682,7 +683,121 @@ class tractorGame():
                             
                         ret.extend([fixed_pok + list(poks) for poks in combinations(singlepok, poker_len-len(fixed_pok))])
                 return ret
+
+    def checkResUnSuspect_repsect(self, play_pok, own_pok, level): # poker: list[int]
+        poker_len = len(play_pok)
+        suit = play_pok[0][0]
+        # typoker = self.checkPokerType(play_pok, level)
+        ret = {'fixedcard':[], 'discard':[]}#分为固定牌和垫牌
+        #出的是主牌
+        if play_pok[0] in self.Major:
+            major_pok = [pok for pok in own_pok if pok in self.Major]
+            my_pok_count = Counter(major_pok)
+
+            #手上没有主牌
+            if len(my_pok_count) == 0:
+                ret['discard'] = own_pok
+
+            #单张
+            if poker_len == 1:
+                ret['discard'] = major_pok
+                return ret
+            #对子
+            if poker_len == 2:
+                ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
+                #没有对子，则用固定牌+垫牌组合
+                if len(ret['fixedcard']) == 0:
+                    combpairs = list(combinations(major_pok, 2))
+                    for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
+                    #主牌不够
+                    if len(ret['fixedcard']) == 0:
+                        ret['fixedcard'] = major_pok
+                        ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
+                return ret
+                
+            # 主牌拖拉机
+            else:
+                deck_Major = major_pok
+                tractors = self.parseTractorPoker(deck_Major, level)
+                ret['fixedcard'] = [tractor for tractor in tractors if len(tractor) == poker_len]
+
+                #没有拖拉机，看有没有对子
+                if len(ret['fixedcard']) == 0:                  
+                    pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
+                    #对子数>=出牌数
+                    if len(pairspok) >= poker_len//2:
+                        combpairs = list(combinations(pairspok, poker_len//2))
+                        for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
+                            
+                    #对子不够，单张来凑
+                    else:
+                        singlepok = [p for p,v in my_pok_count.items() if v == 1]
+                        # if len(singlepok) + len(pairspok)*2 >= poker_len:
+                        singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
+                        pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
+                        for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
+                        #对子加单张都不够
+                        if len(ret['fixedcard']) == 0:
+                            ret['fixedcard'] = deck_Major
+                            ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
+                return ret
+                
+                
+        #出的是副牌
+        else:
+            suit_pok = [pok for pok in own_pok if pok[0] == suit and pok[1] != level]
+            my_pok_count = Counter(suit_pok)
+
+            #手上没有副牌
+            if len(my_pok_count) == 0:
+                ret['discard'] = own_pok
+
+            #单张
+            if poker_len == 1:
+                ret['discard'] = suit_pok
+                return ret
+            #对子
+            if poker_len == 2:
+                ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
+                #没有对子，则用固定牌+垫牌组合
+                if len(ret['fixedcard']) == 0:
+                    combpairs = list(combinations(suit_pok, 2))
+                    for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
+                    #主牌不够
+                    if len(ret['fixedcard']) == 0:
+                        ret['fixedcard'] = suit_pok
+                        ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
+                return ret
+                
+            # 主牌拖拉机
+            else:
+                deck_suit = suit_pok
+                tractors = self.parseTractorPoker(deck_suit, level)
+                ret['fixedcard'] = [tractor for tractor in tractors if len(tractor) == poker_len]
+
+                #没有拖拉机，看有没有对子
+                if len(ret['fixedcard']) == 0:                  
+                    pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
+                    #对子数>=出牌数
+                    if len(pairspok) >= poker_len//2:
+                        combpairs = list(combinations(pairspok, poker_len//2))
+                        for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
+                            
+                    #对子不够，单张来凑
+                    else:
+                        singlepok = [p for p,v in my_pok_count.items() if v == 1]
+                        # if len(singlepok) + len(pairspok)*2 >= poker_len:
+                        singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
+                        pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
+                        for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
+                        #对子加单张都不够
+                        if len(ret['fixedcard']) == 0:
+                            ret['fixedcard'] = deck_suit
+                            ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in deck_suit]
+                return ret
             
+
+       
     # return outpok(The actual move if the move is legal; If illegal, report error)
     def checkLegalMove(self, poker, level, major, currplayer, history, own, banker): # own: All players' hold before this move
     # poker: list[int] player's move
@@ -1342,29 +1457,39 @@ class tractorGame():
             else:
                 major_pok_list.append(k)
                 
-        
-        suit_comb_pok_list = {suit: [] for suit in __SUITSET__}
+        # 为了简化逻辑，这里只取最大张数的甩牌        
         for suit,poks in suit_pok_list.items():
-            for n in range(1, len(poks)+1):
-                comb_poks = list(combinations(poks, n))
-                suit_comb_pok_list[suit].extend(comb_poks)
-        for suit,poks in suit_comb_pok_list.items():
-            poks.sort()
-            outpok.extend(poks)
-            
-        for n in range(1, len(major_pok_list)+1):
-            comb_poks = list(combinations(major_pok_list, n))
+            if len(poks)>1:
+                comb_poks = list(poks)
+                comb_poks.sort()
+                outpok.append(comb_poks)
+        if len(major_pok_list)>1:
+            comb_poks = list(major_pok_list)
             comb_poks.sort()
-            outpok.extend(comb_poks)
+            outpok.append(comb_poks)
+        return outpok
+            
+        # suit_comb_pok_list = {suit: [] for suit in __SUITSET__}
+        # for suit,poks in suit_pok_list.items():
+        #     for n in range(2, len(poks)+1):
+        #         comb_poks = list(combinations(poks, n))
+        #         suit_comb_pok_list[suit].extend(comb_poks)
+        # for suit,poks in suit_comb_pok_list.items():
+        #     poks.sort()
+        #     outpok.extend(poks)
+            
+        # for n in range(2, len(major_pok_list)+1):
+        #     comb_poks = list(combinations(major_pok_list, n))
+        #     comb_poks.sort()
+        #     outpok.extend(comb_poks)
+        # outpok_final = []
+        # element_count = Counter(outpok)
+        # #去除重复
+        # for k, v in element_count.items():
+        #     if v == 1:
+        #         outpok_final.append(k)
 
-        outpok_final = []
-        element_count = Counter(outpok)
-        #去除重复
-        for k, v in element_count.items():
-            if v == 1:
-                outpok_final.append(k)
-
-        return outpok_final
+        # return outpok_final
 
     def call_Snatch(self, get_card, deck, called, snatched, level):
         # get_card: new card in this turn (int)
@@ -1405,8 +1530,10 @@ class tractorGame():
             # self.Major = ['s2', 's3', 's4', 's5', 's7', 's8', 's9', 's0', 'sJ', 'sQ', 'sK', 'sA', 'h6', 'c6', 'd6', 's6', 'jo', 'Jo']
             # self.pointorder = ['2', '3', '4', '5', '7', '8', '9', '0', 'J', 'Q', 'K', 'A']
 
+                   
             ret = self.getTypePoke(poker_deck, level)
-            ret = self.PokerList2Num(ret, deck)
+            flattened_ret = [poke for pokes in ret.values() for poke in pokes]
+            ret = self.PokerList2Num(flattened_ret, deck)
             # return ret[random.randint(0, len(ret))]
             return ret
         
@@ -1460,25 +1587,252 @@ class tractorGame():
                         target_len = len(standard_poker)
                         #单牌
                         if target_len == 1:
-                            out = self.getTypePoke(deck_Major, level, ['single'])
+                            out = self.getTypePoke(deck_Major, level, ['single'])['single']
                         #对子
                         elif target_len == 2:
-                            out = self.getTypePoke(deck_Major, level, ['pair'])
+                            out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
                             if len(out) == 0:
-                                single_out = self.getTypePoke(deck_Major, level, ['single'])
+                                single_out = self.getTypePoke(deck_Major, level, ['single'])['single']
                                 out = list(combinations(single_out, target_len))
                         #拖拉机
                         else:
                             target_parse = self.parseTractorPoker(deck_Major, level)
                             out = [poks for poks in target_parse if len(poks) == target_len]
                             if len(out) == 0:#没有匹配的牌型
-                                pair_out = self.getTypePoke(deck_Major, level, ['pair'])
+                                pair_out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
                                 pair_comb_out = list(combinations(pair_out, target_len//2))
                                 out = [list(itertools.chain.from_iterable(pairs)) for pairs in pair_comb_out]
                                 if len(out) == 0:#没有相同数量的对子组合
                                     pair_out = [pair for pairs in pair_out for pair in pairs]
                                         
-                                    single_out = self.getTypePoke(deck_Major, level, ['single'])
+                                    single_out = self.getTypePoke(deck_Major, level, ['single'])['single']
+                                    single_out = [item[0] for item in single_out if item[0] not in pair_out]
+                                    remain_len = target_len - len(pair_out)
+                                    pair_comb_out = list(combinations(single_out, remain_len))
+                                    
+                                    for single_comb in pair_comb_out:
+                                        out.append(pair_out + list(single_comb))
+                                            
+                                    
+                                     
+                            
+                            # out = []
+                            # #先分析同等牌型可出的牌
+                            # for poks in target_parse:
+                            #     if target_len == 0:
+                            #         break
+                            #     if len(poks) >= target_len:
+                            #         out.extend(poks[:target_len])
+                            #         target_len = 0
+                            #     else:
+                            #         out.extend(poks)
+                            #         target_len -= len(poks)
+                            # #再分析单牌  
+                            # resp = []
+                            # _deck = deck + []
+                            # for pok in out:
+                            #     cardid = self.Poker2Num(pok, _deck)
+                            #     _deck.remove(cardid)
+                            #     resp.append(cardid)
+                            # return resp
+                    
+                #出的是副牌
+                else:
+                    #print("not_major")
+                    suit = standard_poker[0][0]
+                    deck_suit = [pok for pok in poker_deck if pok[0] == suit and pok[1] != level]
+                    if len(deck_suit) <= len(standard_poker):#副牌数量不够
+                        deck_unSuit = [pok for pok in poker_deck if pok not in deck_suit]
+                        comb_unSuit = list(combinations(deck_unSuit, len(standard_poker) - len(deck_suit)))
+                        out = []
+                        for comb in comb_unSuit:
+                            out.append(deck_suit + list(comb))
+                            
+                        # out = deck_suit
+                        # deck_nsuit = [pok for pok in poker_deck if pok not in deck_suit]
+                        # for i in range(len(standard_poker) - len(deck_suit)):
+                        #     out.append(deck_nsuit[i])
+                        # attach_resp = []
+                        # _deck = deck + []
+                        # for pok in out:
+                        #     cardid = self.Poker2Num(pok, _deck)
+                        #     _deck.remove(cardid)
+                        #     attach_resp.append(cardid)
+                        # return attach_resp
+                    
+                    else: #副牌数量够，必须要出副牌
+                        response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
+                        target_len = len(standard_poker)                        
+                        if target_len == 1:#单牌
+                            out = [[p] for p in deck_suit]
+                        else:#对子，拖拉机
+                            target_parse = self.parseTractorPoker(deck_suit, level)
+                            target_parse.sort(key=lambda x: len(x), reverse=True)
+                            out = []
+                            if len(target_parse) == 0:
+                                out = list(combinations(deck_suit, target_len))
+                            else:
+                                for poks in target_parse:
+                                    if len(poks) == target_len:
+                                        out.append(poks)
+                                    else:
+                                        out.append([poks[i-target_len:i]  for i in range(target_len, len(poks), target_len)])
+                                    
+        #甩牌
+        else:
+            #主牌甩牌
+            if standard_poker[0] in self.Major:
+                #print("major")
+                deck_Major = [pok for pok in poker_deck if pok in self.Major]
+                
+                #手上的主牌不够，还需要加上副牌来凑数量
+                if len(deck_Major) < len(standard_poker):
+                    deck_unMajor = [pok for pok in poker_deck if pok not in self.Major]
+                    comb_unMajor = list(combinations(deck_unMajor, len(standard_poker) - len(deck_Major)))
+                    out = []
+                    for comb in comb_unMajor:
+                        out.append(deck_Major + list(comb))
+                
+                #数量正好相等
+                elif len(deck_Major) == len(standard_poker):
+                    out = [deck_Major]
+
+                #手上的主牌数量够，甩牌
+                else:
+                    out = self.suspectMatchCard(deck_Major, standard_poker, level)
+                    
+            #副牌甩牌
+            else:
+                suit = standard_poker[0][0]
+                deck_suit = [pok for pok in poker_deck if pok[0] == suit and pok[1] != level]
+
+                #可出副牌数不够
+                if len(deck_suit) < len(standard_poker):
+                    deck_nsuit = [pok for pok in poker_deck if pok not in deck_suit]
+                    out = []
+                    comb_poks = list(combinations(deck_nsuit, len(standard_poker) - len(deck_suit)))
+                    for poks in comb_poks:
+                        out.append(deck_suit + list(poks))
+
+                #数量正好相等
+                elif len(deck_suit) == len(standard_poker):
+                    out = [deck_suit]
+
+                #可出副牌数够
+                else:
+                    out = self.suspectMatchCard(deck_suit, standard_poker, level)
+
+        ret = []
+        #test code
+        for poks in out:
+            _deck = copy.deepcopy(deck) + []
+            for pok in poks:
+                if type(pok) == list:
+                    self.getLegalPlayCard(history, deck, level)
+                    pass
+                cardid = self.Poker2Num(pok, _deck)
+                if cardid not in _deck:
+                    print(self.Pokers2Num(poks,_deck))
+                    self.getLegalPlayCard(history, deck, level)
+                _deck.remove(cardid)
+        
+        
+        
+        #去除重复
+        repeats = dict()
+        repeats2 = dict()
+        out1 = []
+        for poks in out:
+            outstr = ''.join(poks)
+            if outstr not in repeats:
+                out1.append(poks)
+            else:
+                repeats2[outstr] = poks
+            repeats[outstr] = poks
+        
+        global __MAX_ACTION_NUM__#test code
+        if __MAX_ACTION_NUM__ < len(out1):
+            __MAX_ACTION_NUM__ = len(out1)
+            print(f'最大动作空间：{__MAX_ACTION_NUM__}, pid={os.getpid()}')
+            sout = sorted(out)
+            if sout != out:
+                for subout in out:
+                    if subout not in sout:
+                        pass
+
+
+        ret = self.PokerList2Num(out1, deck)
+        return ret
+    
+    def getLegalActions(self, history, deck, level):        
+        poker_deck = [self.num2Poker(id) for id in deck]
+        
+        # 首发
+        if len(history) == 0: 
+            ret = self.getTypePoke(poker_deck, level, type = ["single", "pair", "tractor", "suspect"])
+            return ret
+       
+        standard_move = history[0]
+        standard_poker = [self.num2Poker(id) for id in standard_move]
+        if self.checkPokerType(standard_move, level) != "suspect": # 不是甩牌
+            pok = [self.num2Poker(p) for p in standard_move] if type(standard_move[0]) == int else standard_move
+            own_pok = [self.num2Poker(p) for p in deck]
+            response = self.checkResUnSuspect(standard_poker, own_pok, level)
+            if response:
+                response = self.PokerList2Num(response, deck)
+                return response
+            else:
+                response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
+                #出的是主牌
+                if standard_poker[0] in self.Major:
+                    #print("major")
+                    deck_Major = [pok for pok in poker_deck if pok in self.Major]
+                    
+                    if len(deck_Major) < len(standard_poker):#手上主牌数少于出牌数
+                        my_major = copy.deepcopy(deck_Major)
+                        deck_nMajor = [pok for pok in poker_deck if pok not in self.Major]
+                        comb_nMajor = list(combinations(deck_nMajor, len(standard_poker) - len(deck_Major)))
+                        out = []
+                        for comb in comb_nMajor:
+                            out.append(my_major + list(comb))
+                        
+                        
+                         
+                        # for i in range(len(standard_poker) - len(deck_Major)):
+                        #     out.append(deck_nMajor[i])
+                        # attach_resp = []
+                        # _deck = deck + []
+                        # for pok in out:
+                        #     cardid = self.Poker2Num(pok, _deck)
+                        #     _deck.remove(cardid)
+                        #     attach_resp.append(cardid)
+                        # return attach_resp
+                        
+                    #手上主牌够，必须出主牌
+                    else:
+                        response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
+                        target_len = len(standard_poker)
+                        #单牌
+                        if target_len == 1:
+                            out = self.getTypePoke(deck_Major, level, ['single'])['single']
+                        #对子
+                        elif target_len == 2:
+                            out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
+                            if len(out) == 0:
+                                single_out = self.getTypePoke(deck_Major, level, ['single'])['single']
+                                out = list(combinations(single_out, target_len))
+                        #拖拉机
+                        else:
+                            target_parse = self.parseTractorPoker(deck_Major, level)
+                            out = [poks for poks in target_parse if len(poks) == target_len]
+                            if len(out) == 0:#没有匹配的牌型
+                                pair_out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
+                                pair_comb_out = list(combinations(pair_out, target_len//2))
+                                out = [list(itertools.chain.from_iterable(pairs)) for pairs in pair_comb_out]
+                                if len(out) == 0:#没有相同数量的对子组合
+                                    pair_out = [pair for pairs in pair_out for pair in pairs]
+                                        
+                                    single_out = self.getTypePoke(deck_Major, level, ['single'])['single']
                                     single_out = [item[0] for item in single_out if item[0] not in pair_out]
                                     remain_len = target_len - len(pair_out)
                                     pair_comb_out = list(combinations(single_out, remain_len))
