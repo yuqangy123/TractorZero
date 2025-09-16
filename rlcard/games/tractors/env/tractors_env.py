@@ -401,7 +401,16 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     seat = env.getPlayerPosition()
                     hand_cards = cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major)
                                         
-                    fixed_action_card, discard_action_card, discard_num = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
+                    response = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
+                    fixed_action_card = []
+                    discard_action_card = []
+                    discard_num = 0
+                    if len(history[1]) == 0:#首出
+                        for value in response.values(): fixed_action_card.append(value)
+                    else:
+                        fixed_action_card = response['fixedcard']
+                        discard_action_card = response['discard']
+                        discard_num = len(history[1]) - len(fixed_action_card[0]) if len(fixed_action_card)>0 else 0
                     
                     obs_x['history_play_card'] = np.array(history_play_card)#历史出牌
                     obs_x['history_play_seat'] = np.array(history_play_seat)#出牌出牌座位号
