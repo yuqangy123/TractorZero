@@ -1769,18 +1769,16 @@ class tractorGame():
         
         # 首发
         if len(history) == 0: 
-            ret = self.getTypePoke(poker_deck, level, type = ["single", "pair", "tractor"])#"suspect" 先不考虑甩牌
-            return ret
+            response = self.getTypePoke(poker_deck, level, type = ["single", "pair", "tractor"])#"suspect" 先不考虑甩牌
+            return response
        
         standard_move = history[0]
         standard_poker = [self.num2Poker(id) for id in standard_move]
-        if self.checkPokerType(standard_move, level) != "suspect": # 不是甩牌
-            pok = [self.num2Poker(p) for p in standard_move] if type(standard_move[0]) == int else standard_move
-            own_pok = [self.num2Poker(p) for p in deck]
-            response = self.checkResUnSuspect_repsect(standard_poker, own_pok, level)
-            for tp, tp_pok_list in response:
-                response[tp] = self.PokerList2Num(tp_pok_list, deck)
-            return response
+        own_pok = [self.num2Poker(p) for p in deck]
+        response = self.checkResUnSuspect_repsect(standard_poker, own_pok, level)
+        for tp, tp_pok_list in response:
+            response[tp] = self.PokerList2Num(tp_pok_list, deck)
+        return response
     
     #own_pok数量>=standard_poker，则直接匹配可出牌型
     def suspectMatchCard(self, own_pok, standard_pok, level):

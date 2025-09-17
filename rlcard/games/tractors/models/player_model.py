@@ -18,14 +18,14 @@ class PlayerEncoder(nn.Module):
     """
     玩家出牌信息特征编码器，用于表示历史出牌中或当前回合中玩家的出牌信息特征
     由手牌+座位号+阵营组成，座位号需转为以自己为1号位的本地座位号
-    hand_matrix: [batch, 2, 4, 14] 手牌矩阵
+    hand_matrix: [batch, 2, 14, 4] 手牌矩阵
     seat_id: [batch] 座位ID (1-4)
     team_id: [batch] 阵营ID (1或2，1为我方，2为敌方)
     经过融合层输出128维的特征向量
     """
     def __init__(self):
         super(PlayerEncoder, self).__init__()
-        cards_embed_dim=2*4*14
+        cards_embed_dim=2*14*4
         seat_embed_dim=4
         team_embed_dim=2
         self.output_dim = 128
@@ -68,11 +68,16 @@ class Actor(nn.Module):
     """
     通过状态编码器编码场面信息。
     出牌一般由固定牌+垫牌组成，固定牌为必须出的牌，垫牌为可以随意出的牌。例如在节拖拉机的牌时，若花色中只有一对牌和若干单牌，则一对牌为固定牌，另外还需要从剩余的牌中取出两张单牌，此为垫牌
-    动作预测的输入是状态编码+N种固定牌组合+可垫牌，输出是预测每张可垫牌的概率
+    动作预测的输入是状态编码+N种固定牌组合+可垫牌，通过分层强化学习预测每张可垫牌的概率+固定牌概率
     """
 
-    def __init__(self) -> None:
+    def __init__(self, obs_dim, hand_cards_dim, deck_cards_dim=0) -> None:
         super().__init__()
+        '''
+        @param obs_dim 表示场面的特征向量维度
+        @param deck_cards_dim 一副扑克牌的向量维度
+        @param hand_cards_dim 玩家手牌的向量维度
+        '''
 
         '''
         状态编码器
@@ -84,25 +89,38 @@ class Actor(nn.Module):
 
         
         '''
-        self.cards_restnet = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
+        #玩家信息编码器
         self.player_encoder = PlayerEncoder()
-        self.lstm = nn.LSTM(self.player_encoder.output_dim, 96, batch_first=True)
-        
-        # 状态投影层（用于点积注意力）
-        self.state_fusion_net = nn.Sequential(
-            nn.Linear(108, n_state_dim),
+
+        #历史出牌时序特征, 256维手牌特征+4维座位号特征+2维阵营特征
+        self.lstm = nn.LSTM(256+4+2, 96, batch_first=True)
+
+        # 手牌特征提取器 (2,4,14) -> 256维
+        self.card_encoder = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
+
+        # 当前轮次的出牌信息        
+        self.round_play_encoder = nn.Sequential(
+            nn.Linear(256+4+2, 256+4+2),
             nn.ReLU(),
-            nn.Linear(n_state_dim, n_state_dim),
-            nn.LayerNorm(n_state_dim)
+            nn.Linear(256+4+2, 256),
+            nn.LayerNorm(256)
+        )
+        
+        # 状态投影层（用于点积注意力）        
+        self.state_fusion_net = nn.Sequential(
+            nn.Linear(108, obs_dim),
+            nn.ReLU(),
+            nn.Linear(obs_dim, obs_dim),
+            nn.LayerNorm(obs_dim)
         )
 
 
         # 固定动作编码器
         self.fixed_action_net = nn.Sequential(
-            nn.Linear(108, n_state_dim),
+            nn.Linear(108, hand_cards_dim),
             nn.ReLU(),
-            nn.Linear(n_state_dim, n_state_dim),
-            nn.LayerNorm(n_state_dim)
+            nn.Linear(hand_cards_dim, hand_cards_dim),
+            nn.LayerNorm(hand_cards_dim)
         )
 
         # 高效的注意力评分网络（双线性形式）
@@ -183,12 +201,21 @@ class Actor(nn.Module):
         play_seat_history_feat = obs_x['history_play_seat']#出牌座位号
         play_team_history_feat = obs_x['history_play_team']#出牌阵营
 
-        play_history_feat = self.player_encoder(play_card_history_feat, play_seat_history_feat, play_team_history_feat)
+        #拼接历史出牌信息进行历史出牌时序预测
+        play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
+        play_history_feat = t.cat([play_card_history_enocdefeat, play_seat_history_feat, play_team_history_feat], dim=0)
         lstm_out, (h_n, _) = self.lstm(play_history_feat)
         
-        own_seat = obs_x['seat']#我的座位号
-        hand_cards = obs_x['hand_cards']#我的手牌
-        curr_round_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
+        #当前轮次的特诊
+        round_play_cards_encodefeat = self.card_encoder(obs_x['round_play_card'])
+        round_play_seat_feat = obs_x['round_play_seat']
+        round_play_team_feat = obs_x['round_play_team']
+        round_play_feat = self.round_play_encoder(t.cat([round_play_cards_encodefeat, round_play_seat_feat, round_play_team_feat], dim=0))
+
+
+        my_seat = obs_x['seat']#我的座位号
+        my_cards = obs_x['hand_cards']#我的手牌
+        round_play_cards_feat =  self.player_encoder(obs_x['round_play_card'], obs_x['round_play_seat'], obs_x['round_play_team'])#当前轮的出牌特征
         last_play_cards_feat = self.player_encoder(play_card_history_feat[-1].unsqueeze(0), play_seat_history_feat[-1].unsqueeze(0), play_team_history_feat[-1].unsqueeze(0))#上一轮出牌
         played_cards = obs_x['played_cards'].unsqueeze(0)#已经出过的牌
         level_cards = obs_x['level_card'].unsqueeze(0)#当前打第几级，用一副扑克表示[1,4,14]当前的级牌
@@ -198,16 +225,16 @@ class Actor(nn.Module):
         combined_feat = self.cards_restnet(combined)#联合计算，提高速度
         
         #预测八张底牌(n/25 * pre_public_card)
-        if obs_x['banker'] == own_seat:
+        if obs_x['banker'] == my_seat:
             pre_publiccard = obs_x['public_card']
             public_card_feat = obs_x['public_card'].copy().unsqueeze(0)
         else:
             for card_mat in obs_x['round_play_card']:
                 remain_cards += card_mat.deatch()
-            remain_cards += hand_cards.detach()
+            remain_cards += my_cards.detach()
             remain_cards = 1-remain_cards
             remain_cards[:, 2:3, :] = 0
-            public_card_feat = t.cat([remain_cards, play_history_feat, curr_round_play_cards_feat], dim=0)
+            public_card_feat = t.cat([remain_cards, play_history_feat, round_play_cards_feat], dim=0)
             public_card_feat = self.cards_restnet(public_card_feat)
             upsampled = F.interpolate(public_card_feat, size=(14, 4), mode='bilinear', align_corners=False)
             probability = self.pro_public_card_head(upsampled)
@@ -215,14 +242,14 @@ class Actor(nn.Module):
         
             # distribution_publiccard = Categorical(probability)
             public_card_feat = t.multinomial(probability, num_samples=8, replacement=False)#无放回采样
-            public_card_feat *= (1 - hand_cards.sum().detach()/25)#最多25张手牌
+            public_card_feat *= (1 - my_cards.sum().detach()/25)#最多25张手牌
             # log_probs_publiccard = distribution_publiccard.log_prob(pre_publiccard).sum(-1)# [batch_size, k]
             # entropy_publiccard = distribution_publiccard.entropy().sum(-1)
             pre_publiccard = public_card_feat.copy()
             pre_publiccard[pre_publiccard > 0] = 1
 
         #融合状态特征
-        fusion_feat = t.cat([hand_cards, own_seat, lstm_out, curr_round_play_cards_feat, last_play_cards_feat, combined_feat, public_card_feat], dim=1)
+        fusion_feat = t.cat([my_cards, my_seat, lstm_out, round_play_cards_feat, last_play_cards_feat, combined_feat, public_card_feat], dim=1)
         state_feat = self.state_fusion_net(fusion_feat)
 
         #通过obs_feat场面信息+actions_fixed+actions_discard预测actions_discard中每张牌的出牌概率

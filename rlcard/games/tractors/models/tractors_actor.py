@@ -21,7 +21,7 @@ from utils import logger
 
 from rlcard.games.tractors.models.bid_model import BidModel
 from rlcard.games.tractors.models.cover_model import CoverModel
-from rlcard.games.tractors.models.play_model import PPOClip as PlayModel
+from rlcard.games.tractors.models.player_model import PPOClip as PlayModel
 from rlcard.games.tractors.utils import *
 
 ActionNumber = 2

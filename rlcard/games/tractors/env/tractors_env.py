@@ -420,7 +420,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     obs_x['hand_cards'] = hand_cards
                     obs_x['round_play_card'] = round_play_card
                     obs_x['round_play_seat'] = round_play_seat
-                    obs_x['round_play_team'] = round_play_team                 
+                    obs_x['round_play_team'] = round_play_team
                     obs_x['player_remain_card_num'] = round_player_remain_card_num                    
                     obs_x['team'] = (obs_x['banker']==seat or obs_x['banker']==(seat+2)%4) and 1 or 2
                     mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['team'], obs_x['banker'])
