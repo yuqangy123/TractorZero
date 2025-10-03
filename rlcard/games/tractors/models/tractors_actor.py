@@ -37,14 +37,14 @@ class TractorsActor():
         self.__models['player'] = PlayModel(args).to(device)
         
 
-
-    def biddingMajor(self, get_card, hold_card, bid_card, own_seat, bid_history, major, level):
+    def bidMajorCard(self, deal_card, hold_card, bid_card, own_pos, called_list, major, level):
+    # def biddingMajor(self, get_card, hold_card, bid_card, own_seat, bid_history, major, level):
         '''
             owned 自己的位置
             called 首次报主的玩家位置
             snatched 反主的玩家位置
         '''
-        hold_card = get_card+hold_card
+        hold_card = deal_card+hold_card
         hold_card = cards2matrix(hold_card, level, major)
         left_num = 25 - sum(hold_card)
         left_num = get_one_hot_array(left_num)

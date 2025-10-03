@@ -318,7 +318,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                 if stage == "deal":
                     level = env.getLevel()
                     deal_card = env.getDeliver()[0]
-                    called_list = env.getCalledList()       
+                    called_list = env.getCalledList()
                     own_pos = env.getPlayerPosition()
                     hold_cards = env.getPlayerHoldCards(own_pos)
                     major = env.getMajor()
@@ -327,7 +327,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                         #self, get_card, hold_card, bid_card, own_seat, bid_history, major, level
                     bid_card = [env.Poker2Num(major + level,[])]*len(called_list)#构造当前已经叫的主牌
                     agent_output = []
-                    if env.biddingMajor(deal_card, hold_cards, bid_card, own_pos, called_list, major, level):
+                    if actor.bidMajorCard(deal_card, hold_cards, bid_card, own_pos, called_list, major, level):
                         agent_output = bid_card
                     response = [own_pos, agent_output]
                     bid_trajectory.append([own_pos, agent_output])

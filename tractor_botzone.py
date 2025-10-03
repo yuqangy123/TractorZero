@@ -1491,18 +1491,53 @@ class tractorGame():
 
         # return outpok_final
 
+
     def call_Snatch(self, get_card, deck, called, snatched, level):
-        # get_card: new card in this turn (int)
-        # deck: your deck (list[int]) before getting the new card
-        # called & snatched: player_id, -1 if not called/snatched
-        # level: level
-        # return -> list[int]
+        # get_card: 本回合新获得的牌 (int)
+        # deck: 获得新牌前的手牌 (list[int])
+        # called & snatched: 已叫庄/抢庄的玩家ID, -1表示还没有人叫庄/抢庄
+        # level: 当前级别
+        # return -> list[int] 返回要亮出的牌
         response = []
-        ## 目前的策略是一拿到牌立刻报/反，之后不再报/反
-        ## 不反无主
-        # deck_poker = [self.num2Poker(id) for id in deck]
         get_poker = self.num2Poker(get_card)
-        if get_poker[1] == level:
+
+        # 不满足报主条件
+        if get_poker[1] != level or \
+            (called != -1 and (get_card + 54) % 108 in deck):
+            return response
+       
+        # 包含新获得的牌
+        deck_pokers = [self.num2Poker(card) for card in deck] + [get_poker]
+        # 统计主牌
+        major_cards = [poker for poker in deck_pokers if poker in self.Major]        
+         # 计算主牌占比
+        major_percentage = len(major_cards) / len(deck_pokers) if len(deck_pokers) > 0 else 0
+
+        #计算主牌牌力值
+        count = Counter(major_cards)
+        last_cnt = 0
+        tractor_len = 0
+        power = 0
+        for k, v in count.items():
+            if count[k] == 1:
+                if last_cnt == 2 : 
+                    power += tractor_len*5
+                    tractor_len = 0
+                elif k == 'jo': power += 2
+                elif k == 'Jo': power += 3
+                elif k[1] == level : power += 1.5
+                elif k[1] == '5' or k == k[1] == '0':power += 1
+                else:power += 0.5
+
+            elif count[k] == 2:
+                if last_cnt == 2 : tractor_len += 1
+                elif k == 'jo' or k == 'Jo' or k[1] == level : power += 4                
+                elif k[1] == '5' or k == k[1] == '0':power += 3
+                else:power += 2
+
+            last_cnt = count[k]
+
+        if (major_percentage >= 0.4 and len(major_cards) > 5) or power >= 8 :
             if called == -1:
                 response = [get_card]
             elif snatched == -1:
@@ -2153,19 +2188,22 @@ def run(env):
     response = None
     level = env.getLevel()
     stage = env.getStage()
+    play_pos = env.getPlayerPosition()
+
     if stage == "deal":
         get_card = env.getDeliver()[0]
         called = env.getCalled()
-        snatched = env.getSnatched()        
-        hold = env.getPlayerHoldCards(env.getPlayerPosition())
-        response = [env.getPlayerPosition(), env.call_Snatch(get_card, hold, called, snatched, level)]
+        snatched = env.getSnatched()
+        
+        hold = env.getPlayerHoldCards(play_pos)
+        response = [play_pos, env.call_Snatch(get_card, hold, called, snatched, level)]
     elif stage == "cover":
         publiccard = env.getPublicCards()
         hold = env.getPlayerHoldCards(env.getBanker())
         response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
     elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
-        hold = env.getPlayerHoldCards(env.getPlayerPosition())
+        hold = env.getPlayerHoldCards(play_pos)
         
         
         playedCards = env.getLegalPlayCard(history_curr, hold, level)
@@ -2176,7 +2214,7 @@ def run(env):
         playedCards = playedCards[random.randint(0, len(playedCards)-1)]#test code
         if type(playedCards) is not list:#test code
             playedCards = env.getLegalPlayCard(history_curr, hold, level)
-        response = [env.getPlayerPosition(), playedCards]
+        response = [play_pos, playedCards]
     elif stage == "roundend":
         pass
     elif stage == "finish":
