@@ -25,7 +25,7 @@ __CARDS_NUM__ = (54*2)
 __HAND_CARD_NUM__ = 25#手牌数量
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
-               11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
+               11: 8, 12: 9, 13: 10, 15: 11, 17: 12}
 
 NumOnes2Array = {0: np.array([0, 0, 0, 0]),
                  1: np.array([1, 0, 0, 0]),
@@ -196,8 +196,8 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
 
 # level=11
 # major=3
-# matrix = np.arange(2*14*4, dtype=np.int8)
-# matrix = matrix.reshape(2, 4, 14)
+# matrix = np.arange(2*15*4, dtype=np.int8)
+# matrix = matrix.reshape(2, 4, 15)
 # matrix_cp = matrix.copy()
 # print(matrix)
 # view = matrix[:,:,level:-1]
@@ -214,12 +214,12 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
 #扑克牌(number)转矩阵
 def cards2matrix(list_cards, level='K', major='s'):
     """
-        'A','2','3','4','5','6','7','8','9','0','J','Q','K','o'
-    s    0   0   0   0   0   0   0   0   0   0   0   0   0   1
-    h    0   0   0   0   0   0   0   0   0   0   0   0   0   1
-    c    0   0   0   0   0   0   0   0   0   0   0   0   0   0
-    d    0   0   0   0   0   0   0   0   0   0   0   0   0   0
-    [2, 4, 14]
+        'A','2','3','4','5','6','7','8','9','0','J','Q','K','o','O'
+    s    0   0   0   0   0   0   0   0   0   0   0   0   0   1   1
+    h    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    c    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    d    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    [2, 4, 15]
     kernel为2*2 更关注对子
 
 
@@ -237,21 +237,24 @@ def cards2matrix(list_cards, level='K', major='s'):
     'J'    0   0   0   0
     'Q'    0   0   0   0
     'K'    0   0   0   0
-    'o'    1   1   0   0
-    [2, 14, 4] 
+    'o'    1   0   0   0
+    'O'    1   0   0   0
+    [2, 15, 4] 
     """
     matrix = np.zeros(54*2, dtype=np.int8)
     matrix[list_cards] = 1
-    matrix = np.insert(matrix, 54, [0,0])
-    matrix = np.insert(matrix, 110, [0,0])
-    matrix = matrix.reshape(2,14,4)
+    matrix = np.insert(matrix, 53, [0,0,0])
+    matrix = np.insert(matrix, 57, [0,0,0])
+    matrix = np.insert(matrix, 60+53, [0,0,0])
+    matrix = np.insert(matrix, 60+57, [0,0,0])
+    matrix = matrix.reshape(2,15,4)
     matrix = np.transpose(matrix, (0,2,1))
 
     # 根据级数调整列顺序数组
     # new_order = list(range(matrix.shape[2]))
     level = __CARDSCALE__.index(level)
     if level != 12:
-        view = matrix[:,:,level:-1]
+        view = matrix[:,:,level:-2]
         view[:]=np.roll(view, shift=-1, axis=2)
 
     # 根据主花色调整行序列数组
@@ -260,20 +263,27 @@ def cards2matrix(list_cards, level='K', major='s'):
         matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
     return matrix
 
-def matrix2card(mat, level='K', major='s'):
+def matrix2cards(mat, level='K', major='s'):
     level = __CARDSCALE__.index(level)
     if level != 12:
-        view = mat[:,:,level:-1]
+        view = mat[:,:,level:-2]
         view[:]=np.roll(view, shift=1, axis=2)
 
     major = __SUITSET__.index(major)
     if major != 0:
         mat[:, [0,major], 0:13] = mat[:, [major,0], 0:13]
 
+    mat = np.transpose(mat, (0,2,1))
     cards = mat.flatten()
-    cards = cards[0:52] + cards[54:106]
-    cards = np.where(cards == 1)
-    return cards
+    # 获取指定索引的元素
+    selected_cards = list(cards[0:52]) + [cards[52], cards[56]] + list(cards[60+0:60+52]) + [cards[60+52], cards[60+56]]
+    # 获取selected_cards中值为1的索引
+    indices = np.where(np.array(selected_cards) == 1)[0]
+    return indices
+
+# card2mst = cards2matrix([66, 3, 56, 76, 40, 33, 48, 80, 52,53, 107,5], '2', 'c')
+# mst2card = matrix2cards(card2mst,  '2', 'c')
+# print(mst2card)
 def get_one_hot_array(num_left_cards, max_num_cards):
     """
     A utility function to obtain one-hot endoding

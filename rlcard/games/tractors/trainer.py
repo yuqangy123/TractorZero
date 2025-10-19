@@ -106,7 +106,7 @@ def create_buffers(flags, device_iterator):
                 #以下是场面信息，每一回合中对所有玩家相同
                 history_play_card=dict(size=(T,15,4,2*4*14), dtype=torch.int8),
                 history_play_seat=dict(size=(T,15,4,4), dtype=torch.int8),
-                history_play_team=dict(size=(T,15,4,4), dtype=torch.int8),
+                history_play_team=dict(size=(T,15,4,2), dtype=torch.int8),
                 history_played_card=dict(size=(T,2*4*14), dtype=torch.int8),
                 history_level_card=dict(size=(T,2*4*14), dtype=torch.int8),
                 history_score_card=dict(size=(T,2*4*14), dtype=torch.int8),

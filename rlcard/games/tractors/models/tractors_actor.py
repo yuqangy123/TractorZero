@@ -47,7 +47,7 @@ class TractorsActor():
         hold_card = deal_card+hold_card
         hold_card = cards2matrix(hold_card, level, major)
         left_num = 25 - sum(hold_card)
-        left_num = get_one_hot_array(left_num)
+        
 
         bid_card = cards2matrix(bid_card, level, major)
 
@@ -67,6 +67,9 @@ class TractorsActor():
 
         hold_card = public_card+hold_card
         hold_card = cards2matrix(hold_card, level, major)
+
+        score_card = cards2matrix([16,17,18,19,36,37,38,39,48,49,50,51,70,71,72,73,90,91,92,93,102,103,104,105], level, major)
+        score_card = cards2matrix(score_card, level, major)
 
         partner_called, rival_called = [],[]
         for bid_pro in bid_history:

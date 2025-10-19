@@ -1511,7 +1511,7 @@ class tractorGame():
         # 统计主牌
         major_cards = [poker for poker in deck_pokers if poker in self.Major]        
          # 计算主牌占比
-        major_percentage = len(major_cards) / len(deck_pokers) if len(deck_pokers) > 0 else 0
+        major_percentage = len(major_cards) / len(deck_pokers)
 
         #计算主牌牌力值
         count = Counter(major_cards)
@@ -1549,6 +1549,76 @@ class tractorGame():
         # old_public: raw publiccard (list[int])
         ## 直接盖回去
             return old_public
+    
+    def cover_Pub2(self, old_public, deck, level):
+        hand_deck = old_public + deck
+        #["single","pair","tractor", "suspect"]
+        poker_deck = [self.num2Poker(id) for id in hand_deck]
+        rule_deck = self.getTypePoke(poker_deck, level, ["single","pair","tractor"])
+        single = [c for c in rule_deck['single'] if c not in self.Major]
+
+        public_card = []
+        roll_card = []
+        major_single = []
+        for card in single:
+            if card[1] != level:
+                if int(card[1]) <= 9:
+                    public_card.append(card)
+                elif card[1] != 'A':
+                    roll_card.append(card)
+            else:
+                major_single.append(card)
+        
+        while True:
+            if len(public_card) >= 8:
+                public_card = random.sample(public_card, 8)
+                break
+            
+            if len(roll_card) >= 8-len(public_card):
+                public_card.extend(random.sample(roll_card, 8-len(public_card)))
+                if len(public_card) == 8:
+                    break
+            else:
+                public_card.extend(roll_card)
+            
+            if len(major_single) >= 8-len(public_card):
+                public_card.extend(random.sample(major_single, 8-len(public_card)))
+                if len(public_card) == 8:
+                    break
+            else:
+                public_card.extend(major_single)
+                
+            pair = [c[0] for c in rule_deck['pair'] if c[0] not in self.Major]*2
+            if len(pair) >= 8-len(public_card):
+                public_card.extend(random.sample(pair, 8-len(public_card)))
+                if len(public_card) == 8:
+                    break
+            else:
+                public_card.extend(pair)
+
+            pair = [c[0] for c in rule_deck['pair'] if c[0] in self.Major]*2
+            if len(pair) >= 8-len(public_card):
+                public_card.extend(random.sample(pair, 8-len(public_card)))
+                if len(public_card) == 8:
+                    break
+            else:
+                public_card.extend(pair)
+
+            for tractor in rule_deck['tractor']:
+                if len(tractor) >= 8-len(public_card):
+                    public_card.extend(random.sample(tractor, 8-len(public_card)))
+                    if len(public_card) == 8:
+                        break
+                else:
+                    public_card.extend(tractor)
+
+            public_card = random.sample(poker_deck, 8)
+            break
+
+        return self.PokerList2Num(public_card, hand_deck)
+    
+
+        
     
     def getLegalPlayCard(self, history, deck, level):
         
@@ -2200,7 +2270,8 @@ def run(env):
     elif stage == "cover":
         publiccard = env.getPublicCards()
         hold = env.getPlayerHoldCards(env.getBanker())
-        response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
+        # response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
+        response = [env.getBanker(), env.cover_PubEx(publiccard, hold)]
     elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
         hold = env.getPlayerHoldCards(play_pos)

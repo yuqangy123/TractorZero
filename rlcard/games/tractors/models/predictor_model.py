@@ -28,23 +28,23 @@ class Predictor(nn.Module):
     """
     输入: state_feat [B, OBS_DIM]
     输出:
-      - opp_marginals: list length NUM_OPPONENTS of [B, 2, 4, 14] (sigmoid)
-      - bottom_marginal: [B, 2, 4, 14] (sigmoid)
+      - opp_marginals: list length NUM_OPPONENTS of [B, 2, 4, 15] (sigmoid)
+      - bottom_marginal: [B, 2, 4, 15] (sigmoid)
       - important_feats: [B, K] e.g. probabilities for set of important predicates:
           [opp_has_scorecard, opp_has_bigcard, opp_has_suit_xyz, ...] per opponent aggregated or global
     """
     def __init__(self, hidden_dim, num_opps):
         super().__init__()
         self.num_opps = num_opps
-        #历史出牌时序特征, 2*4*14维出牌特征+4维座位号特征
+        #历史出牌时序特征, 2*4*15维出牌特征+4维座位号特征
         self.lstm = nn.LSTM(112+4, hidden_dim, batch_first=True)
 
-        # 手牌特征提取器 (2,4,14) -> 112维
+        # 手牌特征提取器 (2,4,15) -> 112维
         self.card_encoder = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
 
-        # Assuming card_count = 2*4*14 = 112
-        self.card_shape = (2, 4, 14)
-        card_count = 2*4*14
+        # Assuming card_count = 2*4*15 = 112
+        self.card_shape = (2, 4, 15)
+        card_count = 2*4*15
         self.opp_heads = nn.ModuleList([nn.Linear(hidden_dim, card_count) for _ in range(num_opps)])
         self.bottom_head = nn.Linear(hidden_dim, card_count)
 
@@ -56,8 +56,10 @@ class Predictor(nn.Module):
         # h = self.obs_proj(state_feat)         # [B, hidden_dim]
         play_card_history_feat = state_feat['history_play_card']#历史出牌
         play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
-        bid_card_history_feat = state_feat['history_bid_card']
-        bid_seat_history_feat = state_feat['history_bid_seat']
+        bid_card_history_feat = state_feat['history_bid_card']#報主記錄
+        bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
+        score_card_feat = state_feat['score_card']#分數牌
+
         
         play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
         play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=0)
@@ -67,18 +69,20 @@ class Predictor(nn.Module):
         bid_history_feat = torch.cat([bid_card_history_enocdefeat, bid_seat_history_feat], dim=0)
         h_bid, (h_n, _) = self.lstm(bid_history_feat)
 
-        in_feat = torch.cat([h_play, h_bid])
+        score_card_encodefeat = self.card_encoder(score_card_feat)
+
+        in_feat = torch.cat([h_play, h_bid, score_card_encodefeat])
 
         opp_logits = [head(in_feat) for head in self.opp_heads]   # each [B, seat, CARD_COUNT]
         bottom_logits = self.bottom_head(in_feat)                 # [B, CARD_COUNT]
         # important_logits = self.important_head(h)           # [B, K]
         # convert to probabilities and reshape
-        opp_probs = [torch.sigmoid(lg).view(-1, *self.card_shape) for lg in opp_logits]   # each [B, seat, 2, 4, 14]
-        bottom_prob = torch.sigmoid(bottom_logits).view(-1, *self.card_shape)             # [B, seat, 2, 4, 14]
+        opp_probs = [torch.sigmoid(lg).view(-1, *self.card_shape) for lg in opp_logits]   # each [B, seat, 2, 4, 15]
+        bottom_prob = torch.sigmoid(bottom_logits).view(-1, *self.card_shape)             # [B, seat, 2, 4, 15]
         # important_prob = torch.sigmoid(important_logits)       # multi-label probabilities
 
         #mask可见牌
-        mask_card = [torch.zeros(*self.card_shape)]*self.num_opps #[seat, 2, 4, 14]
+        mask_card = [torch.zeros(*self.card_shape)]*self.num_opps #[seat, 2, 4, 15]
         for round_idx, player_play_cards in enumerate(play_card_history_feat):
             for seat_idx, play_card in enumerate(player_play_cards):
                 mask_card[play_seat_history_feat[round_idx][seat_idx]] += play_card
@@ -88,7 +92,7 @@ class Predictor(nn.Module):
 
         for i in range(len(opp_probs)):
             mask = mask_card[i] > 0
-            mask = mask.unsqueeze(0).expand_as(opp_probs[i])  # shape: [B, seat, 2, 4, 14]
+            mask = mask.unsqueeze(0).expand_as(opp_probs[i])  # shape: [B, seat, 2, 4, 15]
             opp_probs[i][mask] = 0
             bottom_prob[i][mask] = 0
 
