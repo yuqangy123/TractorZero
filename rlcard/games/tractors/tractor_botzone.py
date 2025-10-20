@@ -9,6 +9,7 @@ import itertools
 import numpy as np
 # full_input = {'log':[]}
 envs = dict()
+from utils import *
 
 ###############################################################
 # 牌面表示：数字
@@ -17,13 +18,13 @@ envs = dict()
 # 请注意：10记为0
 # 共2副108张
 ###############################################################
-__CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
-__SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
-__MAJOR__ = ['jo', 'Jo']#小王 大王
-__POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
-__CARDSCALE_COUNT__ = 14 #点数
-__PLAYER_COUNT__ = 4
-__CARDS_NUM__ = (54*2)
+# __CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
+# __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
+# __MAJOR__ = ['jo', 'Jo']#小王 大王
+# __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
+# __CARDSCALE_COUNT__ = 14 #点数
+# __PLAYER_COUNT__ = 4
+# __CARDS_NUM__ = (54*2)
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
@@ -1206,6 +1207,8 @@ class tractorGame():
 
     #获取玩家手牌
     def getPlayerHoldCards(self, pos):
+        if pos >= len(self.player_hand_cards):
+            pass
         return copy.deepcopy(self.player_hand_cards[pos])
     
     #获取当前叫的主的花色
@@ -1550,7 +1553,7 @@ class tractorGame():
         ## 直接盖回去
             return old_public
     
-    def cover_Pub2(self, old_public, deck, level):
+    def cover_PubEx(self, old_public, deck, level):
         hand_deck = old_public + deck
         #["single","pair","tractor", "suspect"]
         poker_deck = [self.num2Poker(id) for id in hand_deck]
@@ -1561,13 +1564,15 @@ class tractorGame():
         roll_card = []
         major_single = []
         for card in single:
-            if card[1] != level:
-                if int(card[1]) <= 9:
-                    public_card.append(card)
-                elif card[1] != 'A':
-                    roll_card.append(card)
+            if card[0][1] != level and card[0][1] != 'o':
+                if card[0][1] == 'A':
+                    roll_card.append(card[0])
+                elif __CARDSCALE__.index(card[0][1]) < 9:
+                    public_card.append(card[0])
+
+
             else:
-                major_single.append(card)
+                major_single.append(card[0])
         
         while True:
             if len(public_card) >= 8:
@@ -1588,7 +1593,7 @@ class tractorGame():
             else:
                 public_card.extend(major_single)
                 
-            pair = [c[0] for c in rule_deck['pair'] if c[0] not in self.Major]*2
+            pair = [c[0][0] for c in rule_deck['pair'] if c[0][0] not in self.Major]*2
             if len(pair) >= 8-len(public_card):
                 public_card.extend(random.sample(pair, 8-len(public_card)))
                 if len(public_card) == 8:
@@ -1596,7 +1601,7 @@ class tractorGame():
             else:
                 public_card.extend(pair)
 
-            pair = [c[0] for c in rule_deck['pair'] if c[0] in self.Major]*2
+            pair = [c[0][0] for c in rule_deck['pair'] if c[0][0] in self.Major]*2
             if len(pair) >= 8-len(public_card):
                 public_card.extend(random.sample(pair, 8-len(public_card)))
                 if len(public_card) == 8:
@@ -1615,7 +1620,7 @@ class tractorGame():
             public_card = random.sample(poker_deck, 8)
             break
 
-        return self.PokerList2Num(public_card, hand_deck)
+        return self.Pokers2Num(public_card, hand_deck)
     
 
         
@@ -2271,7 +2276,7 @@ def run(env):
         publiccard = env.getPublicCards()
         hold = env.getPlayerHoldCards(env.getBanker())
         # response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
-        response = [env.getBanker(), env.cover_PubEx(publiccard, hold)]
+        response = [env.getBanker(), env.cover_PubEx(publiccard, hold, level)]
     elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
         hold = env.getPlayerHoldCards(play_pos)

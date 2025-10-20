@@ -370,5 +370,5 @@ __all__ = [
     "cards2matrix",
     "get_one_hot_array",
     "get_full_hot_array",
-    "matrix2card",
+    "matrix2cards",
 ]
