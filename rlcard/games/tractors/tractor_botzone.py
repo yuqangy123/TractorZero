@@ -97,7 +97,7 @@ class tractorGame():
                 
                 p = NumInDeck if NumInDeck in _deck else NumInDeck + 54
                 rule_poker.append(p)
-                if p not in _deck:
+                if p not in _deck:# test code
                     pass
                 _deck.remove(p)
             numDesk.append(rule_poker)
@@ -106,6 +106,7 @@ class tractorGame():
     #pokers是个list，list是个扑克牌列表
     def Pokers2Num(self, pokers, deck): # poker: str        
         numDesk = []
+        _deck = copy.deepcopy(deck)
         for poker in pokers:
             NumInDeck = -1
             if poker[0] == "j":
@@ -114,7 +115,11 @@ class tractorGame():
                 NumInDeck = 53
             else:
                 NumInDeck = __CARDSCALE__.index(poker[1])*4 + __SUITSET__.index(poker[0])
-            numDesk.append(NumInDeck if NumInDeck in deck else NumInDeck + 54)
+            p = NumInDeck if NumInDeck in _deck else NumInDeck + 54
+            numDesk.append(p)
+            if p not in _deck:
+                pass
+            _deck.remove(p)
             
         return numDesk
     
@@ -2031,9 +2036,11 @@ class tractorGame():
                     random.seed(seedRandom)
                     if newbanking["banker"] == -1:
                         new_ = True
-                        newbanking["banker"] = random.randint(0, __PLAYER_COUNT__)
+                        newbanking["banker"] = random.randint(0, __PLAYER_COUNT__-1)
+                        if 4 == newbanking["banker"]:# test code
+                            pass
                     if newbanking["major"] == "":
-                        newbanking["major"] = __SUITSET__[random.randint(0, len(__SUITSET__))]
+                        newbanking["major"] = __SUITSET__[random.randint(0, len(__SUITSET__)-1)]
                         self.setMajor(newbanking["major"], self.globalInfo["level"])
                         
                     self.globalInfo["banking"] = newbanking
@@ -2287,7 +2294,7 @@ def run(env):
             playedCards = env.getLegalPlayCard(history_curr, hold, level)
             pass
         playedCardscnt = len(playedCards)
-        playedCards = playedCards[random.randint(0, len(playedCards)-1)]#test code
+        playedCards = playedCards[random.randint(0, len(playedCards)-1)]
         if type(playedCards) is not list:#test code
             playedCards = env.getLegalPlayCard(history_curr, hold, level)
         response = [play_pos, playedCards]
@@ -2314,23 +2321,23 @@ def runGame():
 
 
 if __name__ == '__main__':
-    matrix = np.arange(54*2, dtype=np.int8)
-    arr = [0,2,4,8,52]
-    matrix[arr] = -1
-    matrix = np.insert(matrix, 54, [-2,-2])
-    matrix = np.insert(matrix, 110, [-2,-2])
-    matrix = matrix.reshape(2,14,4)
-    matrix = np.transpose(matrix, (0,2,1))
+    # matrix = np.arange(54*2, dtype=np.int8)
+    # arr = [0,2,4,8,52]
+    # matrix[arr] = -1
+    # matrix = np.insert(matrix, 54, [-2,-2])
+    # matrix = np.insert(matrix, 110, [-2,-2])
+    # matrix = matrix.reshape(2,14,4)
+    # matrix = np.transpose(matrix, (0,2,1))
     
-    # 创建一个新的列顺序数组
-    new_order = list(range(matrix.shape[2]))
-    new_order.remove(2)
-    new_order.insert(12, 2)
+    # # 创建一个新的列顺序数组
+    # new_order = list(range(matrix.shape[2]))
+    # new_order.remove(2)
+    # new_order.insert(12, 2)
 
-    # 使用新的列顺序重新排列矩阵
-    print(matrix)
-    matrix = matrix[:, :, new_order]
-    print(matrix)
+    # # 使用新的列顺序重新排列矩阵
+    # print(matrix)
+    # matrix = matrix[:, :, new_order]
+    # print(matrix)
 
     import multiprocessing
     # scores = os.cpu_count()
