@@ -246,12 +246,12 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
         bid_buff = []
         inning_bid_buff = []
         #埋牌阶段的回放经验
-        cover_cards_buff = []
-        cover_hand_cards_buff = []
-        cover_level_card_buff = []
-        cover_partner_bid_card_buff = []
-        cover_rival_bid_card_buff = []
-        cover_reward_buff = []
+        # cover_cards_buff = []
+        # cover_hand_cards_buff = []
+        # cover_level_card_buff = []
+        # cover_partner_bid_card_buff = []
+        # cover_rival_bid_card_buff = []
+        # cover_reward_buff = []
 
         #出牌阶段的回放经验
         history_play_card_buff = []
@@ -343,26 +343,25 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     agent_output = env.cover_PubEx(publiccard, hold_cards, inning_level)
                     # response = [banker, agent_output]
                     # response = [banker, env.cover_PubEx(publiccard, hold_cards, inning_level)]
-                     
+                    obs_x = {}
+
                     history_level_card = cards2matrix([], inning_level, inning_major)
                     history_level_card[:,0,:] = 1
-                    history_level_card[:,:,12] = 1
-                    history_level_card[:,0:2,13] = 1
-                    obs_x = {}
+                    history_level_card[:,:,12] = 1                    
                     obs_x['level_card'] = history_level_card#历史级牌
                     
                     #埋牌回放经验
-                    cover_cards_buff.append(cards2matrix(agent_output, inning_level, inning_major))
-                    cover_hand_cards_buff.append(cards2matrix(hold_cards, inning_level, inning_major))
-                    cover_partner_bid_card_buff = cards2matrix([], inning_level, inning_major)
-                    cover_rival_bid_card_buff = cards2matrix([], inning_level, inning_major)
+                    # cover_cards_buff.append(cards2matrix(agent_output, inning_level, inning_major))
+                    # cover_hand_cards_buff.append(cards2matrix(hold_cards, inning_level, inning_major))
+                    # cover_partner_bid_card_buff = cards2matrix([], inning_level, inning_major)
+                    # cover_rival_bid_card_buff = cards2matrix([], inning_level, inning_major)
 
-                    cover_level_card_buff = history_level_card
-                    for bids in bid_trajectory:
-                        if (bids[0]+2)%__PLAYER_COUNT__ == seat:
-                            cover_partner_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
-                        else:
-                            cover_rival_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
+                    # cover_level_card_buff = history_level_card
+                    # for bids in bid_trajectory:
+                    #     if (bids[0]+2)%__PLAYER_COUNT__ == seat:
+                    #         cover_partner_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
+                    #     else:
+                    #         cover_rival_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
                     
 
                     #更新对局缓存信息
@@ -422,7 +421,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     obs_x['player_remain_card_num'] = round_player_remain_card_num                    
                     obs_x['team'] = (obs_x['banker']==seat or obs_x['banker']==(seat+2)%4) and 1 or 2
                     mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['team'], obs_x['banker'])
-                    action = matrix2card(mat_action_card, inning_level, inning_major)
+                    action = matrix2cards(mat_action_card, inning_level, inning_major)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
                     response = [env.getPlayerPosition(), action]
@@ -514,30 +513,30 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     
                     #结束
                     if stage == 'gameend':
-                        cover_reward_buff.append(reward)
+                        # cover_reward_buff.append(reward)
                         break
             
                       
             #存储埋牌的经验回放
-            while len(cover_cards_buff) > T:
-                index = cover_free_queue.get()
-                if index is None:
-                    break
-                for t in range(T):
-                    cover_buffers['cover_cards'][index][t, ...] = cover_cards_buff[t]
-                    cover_buffers['hand_cards'][index][t, ...] = cover_hand_cards_buff[t]
-                    cover_buffers['level_cards'][index][t, ...] = cover_level_card_buff[t]
-                    cover_buffers['partner_bid_card'][index][t, ...] = cover_partner_bid_card_buff[t]
-                    cover_buffers['rival_bid_card'][index][t, ...] = cover_rival_bid_card_buff[t]
-                    cover_buffers['reward'][index][t, ...] = cover_reward_buff[t]
+            # while len(cover_cards_buff) > T:
+            #     index = cover_free_queue.get()
+            #     if index is None:
+            #         break
+            #     for t in range(T):
+            #         cover_buffers['cover_cards'][index][t, ...] = cover_cards_buff[t]
+            #         cover_buffers['hand_cards'][index][t, ...] = cover_hand_cards_buff[t]
+            #         cover_buffers['level_cards'][index][t, ...] = cover_level_card_buff[t]
+            #         cover_buffers['partner_bid_card'][index][t, ...] = cover_partner_bid_card_buff[t]
+            #         cover_buffers['rival_bid_card'][index][t, ...] = cover_rival_bid_card_buff[t]
+            #         cover_buffers['reward'][index][t, ...] = cover_reward_buff[t]
                     
-                cover_full_queue.put(index)
-                cover_cards_buff = cover_cards_buff[T:]
-                cover_hand_cards_buff = cover_hand_cards_buff[T:]
-                cover_level_card_buff = cover_level_card_buff[T:]
-                cover_partner_bid_card_buff = cover_partner_bid_card_buff[T:]
-                cover_rival_bid_card_buff = cover_rival_bid_card_buff[T:]
-                cover_reward_buff = cover_reward_buff[T:]
+            #     cover_full_queue.put(index)
+            #     cover_cards_buff = cover_cards_buff[T:]
+            #     cover_hand_cards_buff = cover_hand_cards_buff[T:]
+            #     cover_level_card_buff = cover_level_card_buff[T:]
+            #     cover_partner_bid_card_buff = cover_partner_bid_card_buff[T:]
+            #     cover_rival_bid_card_buff = cover_rival_bid_card_buff[T:]
+            #     cover_reward_buff = cover_reward_buff[T:]
                 
             #存储出牌的经验回放
             while len(history_play_card_buff) > T:

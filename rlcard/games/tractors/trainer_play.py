@@ -13,7 +13,7 @@ import traceback
 from rlcard.utils.file_writer import FileWriter
 from rlcard.games.tractors.models import tractorModel
 from rlcard.games.tractors.models import tractorActor
-from .env.tractors_env import run
+from .env.tractors_env_play import run
 
 from rlcard.games.tractors import learner_cover_model
 
@@ -83,7 +83,8 @@ def create_buffers(flags, device_iterator):
             history_play_seat=dict(size=(T,4,4), dtype=torch.int8),
             history_bid_card=dict(size=(T,2*4*15), dtype=torch.int8),
             history_bid_seat=dict(size=(T,4), dtype=torch.int8),
-            
+            score_card=dict(size=(T,2*4*15), dtype=torch.int8),
+            remain_score_card=dict(size=(T,2*4*15), dtype=torch.int8),
 
             # label
             public_card=dict(size=(T,2*4*15), dtype=torch.int8),

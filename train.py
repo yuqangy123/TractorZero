@@ -1,7 +1,7 @@
 import os
 import argparse
 # from tractorzero.dpo import parser, trainer
-from rlcard.games.tractors import train
+from rlcard.games.tractors import train_play
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("Tractors in RLCard")
@@ -68,4 +68,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
-    train(args)
+    train_play(args)
