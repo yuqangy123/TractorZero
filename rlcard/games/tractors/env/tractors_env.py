@@ -339,8 +339,10 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     inning_level = env.getLevel()
                     
                     #self, public_card, hold_card, own_seat, bid_history, level, major
-                    agent_output = actor.coverCard(publiccard, hold_cards, bid_trajectory, inning_major, inning_level)
-                    response = [banker, agent_output]
+                    # agent_output = actor.coverCard(publiccard, hold_cards, bid_trajectory, inning_major, inning_level)
+                    agent_output = env.cover_PubEx(publiccard, hold_cards, inning_level)
+                    # response = [banker, agent_output]
+                    # response = [banker, env.cover_PubEx(publiccard, hold_cards, inning_level)]
                      
                     history_level_card = cards2matrix([], inning_level, inning_major)
                     history_level_card[:,0,:] = 1

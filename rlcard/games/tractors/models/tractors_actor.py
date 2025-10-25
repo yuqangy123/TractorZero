@@ -63,14 +63,11 @@ class TractorsActor():
         return pre > 0.5
 
     def coverCard(self, public_card, hold_card, own_seat, bid_history, level, major):
-        mask = hold_card
+        hold_cards = public_card+hold_card
+        hold_cards_mat = cards2matrix(hold_cards, level, major)
 
-        hold_card = public_card+hold_card
-        hold_card = cards2matrix(hold_card, level, major)
-
-        score_card = cards2matrix([16,17,18,19,36,37,38,39,48,49,50,51,70,71,72,73,90,91,92,93,102,103,104,105], level, major)
-        score_card = cards2matrix(score_card, level, major)
-
+        score_cards = cards2matrix([16,17,18,19,36,37,38,39,48,49,50,51,70,71,72,73,90,91,92,93,102,103,104,105], level, major)#分數牌
+        
         partner_called, rival_called = [],[]
         for bid_pro in bid_history:
             if bid_pro[0] != own_seat:
@@ -79,12 +76,11 @@ class TractorsActor():
                 else:
                     rival_called = bid_pro[1]
                 
-        hold_card = cards2matrix(hold_card, level, major)
-        partner_called = cards2matrix(partner_called, level, major)
-        rival_called = cards2matrix(rival_called, level, major)
+        partner_called_mat = cards2matrix(partner_called, level, major)
+        rival_called_mat = cards2matrix(rival_called, level, major)
         
-        cover_card = self.__models.cover(hold_card, partner_called, rival_called, mask)
-        cover_card = matrix2card(cover_card)
+        cover_card = self.__models.cover(hold_cards_mat, partner_called_mat, rival_called_mat, hold_cards)
+        cover_card = matrix2cards(cover_card)
         return cover_card
 
     def playCard(self, obs_x, actions_fixed, actions_discard, discard_num, team, banker_seat):

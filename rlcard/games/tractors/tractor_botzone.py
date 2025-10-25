@@ -613,9 +613,8 @@ class tractorGame():
             else: 
                 # deck_Major = [pok for pok in own_pok if pok in self.Major]
                 deck_Major = major_pok
-                tractors = self.parseTractorPoker(deck_Major, level)
-                ret = [tractor for tractor in tractors if len(tractor) == poker_len]
-
+                ret = self.parseTractorPoker(deck_Major, level, poker_len)
+                
                 #没有拖拉机，看有没有对子
                 if len(ret) == 0:                  
                     pairspok = [p for p,v in my_pok_count.items() if v == 2]
@@ -660,16 +659,13 @@ class tractorGame():
             
             #副牌拖拉机
             else:
-                tractors = self.parseTractorPoker(suit_pok, level)
-                ret = [tractor for tractor in tractors if len(tractor) == poker_len]
+                ret = self.parseTractorPoker(suit_pok, level, poker_len)
                 #没有副拖拉机
                 if len(ret) == 0:
                     #看有没有主牌拖拉机
                     deck_Major = [pok for pok in own_pok if pok in self.Major]
-                    tractors = self.parseTractorPoker(deck_Major, level)
-                    ret_tr = [tractor for tractor in tractors if len(tractor) == poker_len]
-                    ret.extend(ret_tr)
-
+                    ret = self.parseTractorPoker(deck_Major, level, poker_len)
+                    
                     #其他牌
                     pairspok = [p for p,v in my_pok_count.items() if v == 2]                    
                     #对子数>=出牌数
@@ -724,8 +720,7 @@ class tractorGame():
             # 主牌拖拉机
             else:
                 deck_Major = major_pok
-                tractors = self.parseTractorPoker(deck_Major, level)
-                ret['fixedcard'] = [tractor for tractor in tractors if len(tractor) == poker_len]
+                ret['fixedcard'] = self.parseTractorPoker(deck_Major, level, poker_len)
 
                 #没有拖拉机，看有没有对子
                 if len(ret['fixedcard']) == 0:                  
@@ -778,8 +773,7 @@ class tractorGame():
             # 拖拉机
             else:
                 deck_suit = suit_pok
-                tractors = self.parseTractorPoker(deck_suit, level)
-                ret['fixedcard'] = [tractor for tractor in tractors if len(tractor) == poker_len]
+                ret['fixedcard'] = self.parseTractorPoker(deck_suit, level, poker_len)
 
                 #没有拖拉机，看有没有对子
                 if len(ret['fixedcard']) == 0:                  
@@ -1344,53 +1338,53 @@ class tractorGame():
             outpok.extend(single_pok)
         finalpok = outpok
         
-    #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机）
-    def parsePoker(self, pok, level):
-    # poker: 甩牌牌型 list[int]
-    # level & major: 级牌、主花牌
-        outpok = []
-        failpok = []
-        count = Counter(pok)
-        # 优先检查整牌型（拖拉机）
-        pos = []
-        tractor = []
-        suit = ''
-        for k, v in count.items():
-            if v == 2:
-                if k != 'jo' and k != 'Jo' and k[1] != level: # 大小王和级牌当然不会参与拖拉机
-                    pos.append(self.pointorder.index(k[1]))
-                    suit = k[0]
-        if len(pos) >= 2:
-            pos.sort()
-            tmp = []
-            suc_flag = False
-            for i in range(len(pos)-1):
-                if pos[i+1]-pos[i] == 1:
-                    if not suc_flag:
-                        tmp = [suit + self.pointorder[pos[i]], suit + self.pointorder[pos[i]], \
-                               suit + self.pointorder[pos[i+1]], suit + self.pointorder[pos[i+1]]]
-                        del count[suit + self.pointorder[pos[i]]]
-                        del count[suit + self.pointorder[pos[i+1]]] # 已计入拖拉机的，从牌组中删去
-                        suc_flag = True
-                    else:
-                        tmp.extend([suit + self.pointorder[pos[i+1]], suit + self.pointorder[pos[i+1]]])
-                        del count[suit + self.pointorder[pos[i+1]]]
-                elif suc_flag:
-                    tractor.append(tmp)
-                    suc_flag = False
-            if suc_flag:
-                tractor.append(tmp)
-        # 对牌型作基础的拆分 
-        for k,v in count.items(): 
-            outpok.append([k for i in range(v)])
-        outpok.extend(tractor)
+    # #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机）
+    # def parsePoker(self, pok, level):
+    # # poker: 甩牌牌型 list[int]
+    # # level & major: 级牌、主花牌
+    #     outpok = []
+    #     failpok = []
+    #     count = Counter(pok)
+    #     # 优先检查整牌型（拖拉机）
+    #     pos = []
+    #     tractor = []
+    #     suit = ''
+    #     for k, v in count.items():
+    #         if v == 2:
+    #             if k != 'jo' and k != 'Jo' and k[1] != level: # 大小王和级牌当然不会参与拖拉机
+    #                 pos.append(self.pointorder.index(k[1]))
+    #                 suit = k[0]
+    #     if len(pos) >= 2:
+    #         pos.sort()
+    #         tmp = []
+    #         suc_flag = False
+    #         for i in range(len(pos)-1):
+    #             if pos[i+1]-pos[i] == 1:
+    #                 if not suc_flag:
+    #                     tmp = [suit + self.pointorder[pos[i]], suit + self.pointorder[pos[i]], \
+    #                            suit + self.pointorder[pos[i+1]], suit + self.pointorder[pos[i+1]]]
+    #                     del count[suit + self.pointorder[pos[i]]]
+    #                     del count[suit + self.pointorder[pos[i+1]]] # 已计入拖拉机的，从牌组中删去
+    #                     suc_flag = True
+    #                 else:
+    #                     tmp.extend([suit + self.pointorder[pos[i+1]], suit + self.pointorder[pos[i+1]]])
+    #                     del count[suit + self.pointorder[pos[i+1]]]
+    #             elif suc_flag:
+    #                 tractor.append(tmp)
+    #                 suc_flag = False
+    #         if suc_flag:
+    #             tractor.append(tmp)
+    #     # 对牌型作基础的拆分 
+    #     for k,v in count.items(): 
+    #         outpok.append([k for i in range(v)])
+    #     outpok.extend(tractor)
 
-        finalpok = outpok
+    #     finalpok = outpok
 
-        return finalpok 
+    #     return finalpok 
     
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机）
-    def parseTractorPoker(self, poker, level):
+    def parseTractorPoker(self, poker, level, tractor_len=0):
     # poker: 甩牌牌型 list[int]
     # level & self.Major: 级牌、主花牌
         if len(poker) == 0:
@@ -1398,7 +1392,7 @@ class tractorGame():
         
 
         pospok = []
-        tractor = []
+        tractors = []
         count = Counter(poker)
         for k, v in count.items():
             if v == 2:
@@ -1422,31 +1416,20 @@ class tractorGame():
                             tmp.extend([suit + self.pointorder[pospok[i+1][0]], suit + self.pointorder[pospok[i+1][0]]])
                             del count[suit + self.pointorder[pospok[i+1][0]]]
                     elif suc_flag:
-                        tractor.append(tmp)
+                        tractors.append(tmp)
                         suc_flag = False
                 if suc_flag:
-                    tractor.append(tmp)
+                    tractors.append(tmp)
 
-        outpok = tractor
-        # def find_long_subarrays(arr, r=4):
-        #     subarrays = []
-        #     n = len(arr)            
-        #     for start in range(0, n - r + 1, 2):
-        #         subarrays.append(arr[start:start+r])            
-        #     return subarrays
-        
-        #找出超过3拖中的子拖拉机
-        # sub_tractors = []
-        # for _opok in outpok :
-        #     _opok_len = len(_opok)        
-        #     sub_tractors = []
-        #     for i in range(2, 24, 2):
-        #         if _opok_len == 4+i:
-        #             for j in range(4, _opok_len-1, 2):
-        #                 sub_tractor = find_long_subarrays(_opok[:], j)
-        #                 sub_tractors.extend(sub_tractor)
-        #             break
-        # outpok.extend(sub_tractors)
+        outpok = []
+        if tractor_len > 0:
+            # 過長的拖拉機拆分成連續長度為poker_len的子拖拉机
+            for tractor in tractors:
+                for idx in range(0, len(tractor), 2):
+                    if idx+tractor_len <= len(tractor):outpok.append(tractor[idx:idx+tractor_len])
+        else:
+            outpok = tractors
+
         return outpok
 
     #分析得到可甩牌牌型（大小王和级牌当然不会参与甩牌）
@@ -1711,8 +1694,7 @@ class tractorGame():
                                 out = list(combinations(single_out, target_len))
                         #拖拉机
                         else:
-                            target_parse = self.parseTractorPoker(deck_Major, level)
-                            out = [poks for poks in target_parse if len(poks) == target_len]
+                            out = self.parseTractorPoker(deck_Major, level, target_len)
                             if len(out) == 0:#没有匹配的牌型
                                 pair_out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
                                 pair_comb_out = list(combinations(pair_out, target_len//2))
@@ -1781,17 +1763,21 @@ class tractorGame():
                         if target_len == 1:#单牌
                             out = [[p] for p in deck_suit]
                         else:#对子，拖拉机
-                            target_parse = self.parseTractorPoker(deck_suit, level)
-                            target_parse.sort(key=lambda x: len(x), reverse=True)
-                            out = []
-                            if len(target_parse) == 0:
+                            out = self.parseTractorPoker(deck_suit, level, target_len)
+                            if len(out) == 0:
                                 out = list(combinations(deck_suit, target_len))
-                            else:
-                                for poks in target_parse:
-                                    if len(poks) == target_len:
-                                        out.append(poks)
-                                    else:
-                                        out.append([poks[i-target_len:i]  for i in range(target_len, len(poks), target_len)])
+
+                            # target_parse = self.parseTractorPoker(deck_suit, level, target_len)
+                            # target_parse.sort(key=lambda x: len(x), reverse=True)
+                            # out = []
+                            # if len(target_parse) == 0:
+                            #     out = list(combinations(deck_suit, target_len))
+                            # else:
+                            #     for poks in target_parse:
+                            #         if len(poks) == target_len:
+                            #             out.append(poks)
+                            #         else:
+                            #             out.append([poks[i-target_len:i]  for i in range(target_len, len(poks), target_len)])
                                     
         #甩牌
         else:
@@ -1903,9 +1889,10 @@ class tractorGame():
         if len(standard_tractor) > 0:
             for sttractor in standard_tractor:
                 standard_pok1 = list(filter(lambda x: x not in sttractor, standard_pok))#去除standard_pok中的sttractor
-                own_tractor = self.parseTractorPoker(own_pok, level)
-                for owtractor in own_tractor:
-                    if len(owtractor) == len(sttractor):
+                sttractor_len = len(sttractor)
+                own_tractors = self.parseTractorPoker(own_pok, level, sttractor_len)
+                for owtractor in own_tractors:
+                    # if len(owtractor) == len(sttractor):
                         own_pok1 = list(filter(lambda x: x not in owtractor, own_pok))
                         remain_match_poks = self.suspectMatchCard(own_pok1, standard_pok1, level)
                         for remain_patch_pok in remain_match_poks:
@@ -2353,4 +2340,3 @@ if __name__ == '__main__':
     for p in processes:
         p.join()
     pass
-

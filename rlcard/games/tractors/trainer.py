@@ -79,14 +79,15 @@ def create_buffers(flags, device_iterator):
 
         #隐藏信息预测模型buffer
         specs = dict(
-            history_play_card=dict(size=(T,4,2*4*14), dtype=torch.int8),
+            history_play_card=dict(size=(T,4,2*4*15), dtype=torch.int8),
             history_play_seat=dict(size=(T,4,4), dtype=torch.int8),
-            history_bid_card=dict(size=(T,2*4*14), dtype=torch.int8),
+            history_bid_card=dict(size=(T,2*4*15), dtype=torch.int8),
             history_bid_seat=dict(size=(T,4), dtype=torch.int8),
+            
 
             # label
-            public_card=dict(size=(T,2*4*14), dtype=torch.int8),
-            play_hand_card=dict(size=(T,4,2*4*14), dtype=torch.int8),
+            public_card=dict(size=(T,2*4*15), dtype=torch.int8),
+            play_hand_card=dict(size=(T,4,2*4*15), dtype=torch.int8),
         )
         _buffers: Buffers = {key: [] for key in specs}
         for _ in range(flags.num_buffers):
@@ -104,26 +105,26 @@ def create_buffers(flags, device_iterator):
             state_dim = 319 if position == 'banker' else 430#状态维度
             specs = dict(
                 #以下是场面信息，每一回合中对所有玩家相同
-                history_play_card=dict(size=(T,15,4,2*4*14), dtype=torch.int8),
+                history_play_card=dict(size=(T,15,4,2*4*15), dtype=torch.int8),
                 history_play_seat=dict(size=(T,15,4,4), dtype=torch.int8),
                 history_play_team=dict(size=(T,15,4,2), dtype=torch.int8),
-                history_played_card=dict(size=(T,2*4*14), dtype=torch.int8),
-                history_level_card=dict(size=(T,2*4*14), dtype=torch.int8),
-                history_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
-                history_remain_score_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_played_card=dict(size=(T,2*4*15), dtype=torch.int8),
+                history_level_card=dict(size=(T,2*4*15), dtype=torch.int8),
+                history_score_card=dict(size=(T,2*4*15), dtype=torch.int8),
+                history_remain_score_card=dict(size=(T,2*4*15), dtype=torch.int8),
                 history_banker=dict(size=(T, 2), dtype=torch.int8),
-                history_public_card=dict(size=(T,2*4*14), dtype=torch.int8),
+                history_public_card=dict(size=(T,2*4*15), dtype=torch.int8),
 
                 #每一回合范围内的每一步的场面信息，
-                round_play_card=dict(size=(T,4,2*4*14), dtype=torch.int8),
+                round_play_card=dict(size=(T,4,2*4*15), dtype=torch.int8),
                 round_play_seat=dict(size=(T,4), dtype=torch.int8),
                 round_play_team=dict(size=(T,4), dtype=torch.int8),
                 # point=dict(size=(T,15,), dtype=torch.int8),
                 seat=dict(size=(T, 4, 4), dtype=torch.int8),
                 team=dict(size=(T, 4, 2), dtype=torch.int8),
-                hand_cards=dict(size=(T, 4, 2*4*14), dtype=torch.float),
+                hand_cards=dict(size=(T, 4, 2*4*15), dtype=torch.float),
                 player_remain_card_num=dict(size=(T, 4, 25), dtype=torch.int8),
-                action=dict(size=(T,4, 2*4*14), dtype=torch.int8),
+                action=dict(size=(T,4, 2*4*15), dtype=torch.int8),
 
                 #奖励信息
                 reward=dict(size=(T,4, ), dtype=torch.float32),
