@@ -1,6 +1,6 @@
 ''' Register rule-based models or pre-trianed models
 '''
-from rlcard.games.tractors.models.tractors_model import TractorsModel as tractorModel
+
 from rlcard.games.tractors.models.tractors_actor import TractorsActor as tractorActor
 
 # register(

@@ -1,21 +1,5 @@
-import time
-import pickle
-import torch
-from argparse import ArgumentParser
-from multiprocessing import Process
-from random import randint
-# import sys
-import psutil
-import os
-# import objgraph
-import gc
 
-import numpy as np
-import zmq
-from pathlib import Path
-from tractors.models.ppo_model import MLPActorCritic, MLPQNetwork
-from pyarrow import deserialize, serialize
-from utils import logger
+# from rlcard.games.tractors.models.ppo_model import MLPActorCritic, MLPQNetwork
 # from rlcard.tractors.utils import *
 # from rlcard.tractors.models.tractors_model import TractorsModel as Model
 
@@ -30,13 +14,16 @@ ActionNumber = 2
 class TractorsActor():
     def __init__(self, device='cpu', args={}):
         self.__models = dict()
-        self.__models['bid'] = BidModel(args).to(device)
-        self.__models['cover'] = CoverModel(args).to(device)
-        self.__models['predictor'] = PredictModel(args).to(device)
-        #不区分team
-        # self.__models['banker'] = PlayModel(args).to(device)
-        self.__models['player'] = PlayModel(args).to(device)
+        # self.__models['bid'] = BidModel(args).to(device)
+        # self.__models['cover'] = CoverModel(args).to(device)
         
+        # #不区分team
+        # # self.__models['banker'] = PlayModel(args).to(device)
+        # self.__models['player'] = PlayModel(args).to(device)
+        
+        # self, hidden_dim, num_opps
+        self.__models['predictor'] = PredictModel().to(device)
+
 
     # def bidMajorCard(self, deal_card, hold_card, bid_card, own_pos, called_list, major, level):
     # # def biddingMajor(self, get_card, hold_card, bid_card, own_seat, bid_history, major, level):

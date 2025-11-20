@@ -24,29 +24,30 @@ class Env(object):
                 'rlcard/envs/blackjack.py'
                 TODO: Support more game configurations in the future.
         '''
-        self.allow_step_back = self.game.allow_step_back = config['allow_step_back']
-        self.action_recorder = []
+        # self.allow_step_back = self.game.allow_step_back = config['allow_step_back']
+        # self.action_recorder = []
 
-        # Game specific configurations
-        # Currently only support blackjack、limit-holdem、no-limit-holdem
-        # TODO support game configurations for all the games
-        supported_envs = ['blackjack', 'leduc-holdem', 'limit-holdem', 'no-limit-holdem']
-        if self.name in supported_envs:
-            _game_config = self.default_game_config.copy()
-            for key in config:
-                if key in _game_config:
-                    _game_config[key] = config[key]
-            self.game.configure(_game_config)
+        # # Game specific configurations
+        # # Currently only support blackjack、limit-holdem、no-limit-holdem
+        # # TODO support game configurations for all the games
+        # supported_envs = ['blackjack', 'leduc-holdem', 'limit-holdem', 'no-limit-holdem']
+        # if self.name in supported_envs:
+        #     _game_config = self.default_game_config.copy()
+        #     for key in config:
+        #         if key in _game_config:
+        #             _game_config[key] = config[key]
+        #     self.game.configure(_game_config)
 
-        # Get the number of players/actions in this game
-        self.num_players = self.game.get_num_players()
-        self.num_actions = self.game.get_num_actions()
+        # # Get the number of players/actions in this game
+        # self.num_players = self.game.get_num_players()
+        # self.num_actions = self.game.get_num_actions()
 
-        # A counter for the timesteps
-        self.timestep = 0
+        # # A counter for the timesteps
+        # self.timestep = 0
 
-        # Set random seed, default is None
-        self.seed(config['seed'])
+        # # Set random seed, default is None
+        # self.seed(config['seed'])
+        pass
 
 
     def reset(self):
@@ -58,9 +59,10 @@ class Env(object):
                 (numpy.array): The begining state of the game
                 (int): The begining player
         '''
-        state, player_id = self.game.init_game()
-        self.action_recorder = []
-        return self._extract_state(state), player_id
+        # state, player_id = self.game.init_game()
+        # self.action_recorder = []
+        # return self._extract_state(state), player_id
+        pass
 
     def step(self, action, raw_action=False):
         ''' Step forward
@@ -75,15 +77,16 @@ class Env(object):
                 (dict): The next state
                 (int): The ID of the next player
         '''
-        if not raw_action:
-            action = self._decode_action(action)
+        pass
+        # if not raw_action:
+        #     action = self._decode_action(action)
 
-        self.timestep += 1
-        # Record the action for human interface
-        self.action_recorder.append((self.get_player_id(), action))
-        next_state, player_id = self.game.step(action)
+        # self.timestep += 1
+        # # Record the action for human interface
+        # self.action_recorder.append((self.get_player_id(), action))
+        # next_state, player_id = self.game.step(action)
 
-        return self._extract_state(next_state), player_id
+        # return self._extract_state(next_state), player_id
 
     def step_back(self):
         ''' Take one step backward.
@@ -220,15 +223,17 @@ class Env(object):
         Returns:
             (numpy.array): The action features
         '''
-        # By default we use one-hot encoding
-        feature = np.zeros(self.num_actions, dtype=np.int8)
-        feature[action] = 1
-        return feature
+        # # By default we use one-hot encoding
+        # feature = np.zeros(self.num_actions, dtype=np.int8)
+        # feature[action] = 1
+        # return feature
+        pass
 
     def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        self.game.np_random = self.np_random
-        return seed
+        pass
+        # self.np_random, seed = seeding.np_random(seed)
+        # self.game.np_random = self.np_random
+        # return seed
 
     def _extract_state(self, state):
         ''' Extract useful information from state for RL. Must be implemented in the child class.
@@ -263,3 +268,6 @@ class Env(object):
         Note: Must be implemented in the child class.
         '''
         raise NotImplementedError
+
+    def getError(self):
+        return ''

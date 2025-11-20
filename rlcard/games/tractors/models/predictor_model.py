@@ -33,9 +33,10 @@ class Predictor(nn.Module):
       - important_feats: [B, K] e.g. probabilities for set of important predicates:
           [opp_has_scorecard, opp_has_bigcard, opp_has_suit_xyz, ...] per opponent aggregated or global
     """
-    def __init__(self, hidden_dim, num_opps):
+    def __init__(self):
         super().__init__()
-        self.num_opps = num_opps
+        num_opps = 4
+        hidden_dim = 256
         #历史出牌时序特征, 2*4*15维出牌特征+4维座位号特征
         self.lstm = nn.LSTM(112+4, hidden_dim, batch_first=True)
 
@@ -70,15 +71,22 @@ class Predictor(nn.Module):
         
         play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
         play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=0)
-        h_play, (h_n, _) = self.lstm(play_history_feat)
+        h_play, (_, _) = self.lstm(play_history_feat)
 
-        bid_card_history_enocdefeat = self.card_encoder(bid_card_history_feat)
-        bid_history_feat = torch.cat([bid_card_history_enocdefeat, bid_seat_history_feat], dim=0)
-        h_bid, (h_n, _) = self.lstm(bid_history_feat)
+        bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
+        bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=0)
+        h_bid, (_, _) = self.lstm(bid_history_feat)
 
+        round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
+        round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=0)
+        h_round, (_, _) = self.lstm(round_history_feat)
+
+        played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
         score_card_encodefeat = self.card_encoder(score_card_feat)
+        score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
 
-        in_feat = torch.cat([h_play, h_bid, score_card_encodefeat])
+        #特征融合
+        in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat])
 
         opp_logits = [head(in_feat) for head in self.opp_heads]   # each [B, seat, CARD_COUNT]
         bottom_logits = self.bottom_head(in_feat)                 # [B, CARD_COUNT]

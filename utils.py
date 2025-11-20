@@ -47,8 +47,6 @@ log.setLevel(logging.INFO)
 # and learner processes. They are shared tensors in GPU
 Buffers = typing.Dict[str, typing.List[torch.Tensor]]
 
-def create_env(flags):
-    return Env(flags.objective)
 
 def get_batch(free_queue,
               full_queue,

@@ -40,11 +40,6 @@ def learn(actor_model,
           mean_episode_return_buf,
           lock):
     
-    history_play_card = batch['history_play_card'].to(device)
-    history_play_seat = batch['history_play_seat'].to(device)
-    history_bid_card = batch['history_bid_card'].to(device)
-    history_bid_seat = batch['history_bid_seat'].to(device)
-
     label_hand_card = batch['play_hand_card'].to(device)
     label_public_card = batch['public_card'].to(device)
 
@@ -56,7 +51,7 @@ def learn(actor_model,
         loss = loss_opp + loss_bottom
         
         stats = {
-            'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['cover']])).item(),
+            'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['predictor']])).item(),
             'loss': loss.item(),
         }
         
@@ -65,6 +60,6 @@ def learn(actor_model,
         nn.utils.clip_grad_norm_(learn_model.parameters(), flags.max_grad_norm)
         optimizer.step()
 
-        for actor_model in actor_model.values():
-            actor_model.load_state_dict(learn_model.state_dict())
+        actor_model.get_model('predictor').load_state_dict(learn_model.get_model('predictor').state_dict())
+
         return stats

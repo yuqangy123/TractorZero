@@ -1,7 +1,9 @@
 import os
 import argparse
 # from tractorzero.dpo import parser, trainer
-from rlcard.games.tractors import train_play
+# from rlcard.games.tractors import train_play
+from rlcard.games.tractors import train_predict
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("Tractors in RLCard")
@@ -37,7 +39,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--savedir',
-        default='experiments/ppo_result',
+        default='experiments/predictor_result',
         help='Root dir where experiment data will be saved'
     )
     parser.add_argument(
@@ -64,8 +66,49 @@ if __name__ == '__main__':
         type=str,
         help='The index of the GPU used for training models',
     )
+    parser.add_argument(
+        '--gpu_devices',
+        default="0",
+        type=str,
+    )
+    parser.add_argument(
+        '--unroll_length',
+        default=100,
+        type=int,
+    )
+    parser.add_argument(
+        '--batch_size',
+        default=64,
+        type=int,
+    )
+    parser.add_argument(
+        '--num_buffers',
+        default=50,
+        type=int,
+    )
+    parser.add_argument(
+        '--lr',
+        default=0.005,
+        type=float,
+    )
+    parser.add_argument(
+        '--num_threads',
+        default=1,
+        type=int,
+    )
+    parser.add_argument(
+        '--total_frames',
+        default=100000000000,
+        type=int,
+    )
+    parser.add_argument(
+        '--disable_checkpoint',
+        default=False,
+        type=bool,
+    )
+    
 
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
-    train_play(args)
+    train_predict.train(args)

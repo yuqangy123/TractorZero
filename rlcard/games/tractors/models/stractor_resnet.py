@@ -56,7 +56,7 @@ class ResNet(nn.Module):
         # 残差层
         self.reslayers = []
         for i in range(min(len(layers), len(hidden_channels))):
-            self.reslayers.push(self._make_layer(block, hidden_channels[i], layers[i], stride=stride))
+            self.reslayers.append(self._make_layer(block, hidden_channels[i], layers[i], stride=stride))
 
         # 全局平均池化和全连接层
         # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))

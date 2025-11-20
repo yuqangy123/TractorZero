@@ -1,15 +1,13 @@
 ''' Register new environments
 '''
-from rlcard.envs.env import Env
-# from rlcard.envs.frame.registration import register, make
+# from rlcard.envs.env import Env
+from rlcard.envs.frame.registration import register, make
 
 
-
-# register(
-#     env_id='doudizhu',
-#     entry_point='rlcard.envs.doudizhu:DoudizhuEnv',
-# )
-
+register(
+    env_id='tractors',
+    entry_point='rlcard.games.tractors.env.tractors_env:TractorsEnv',
+)
 
 # register(
 #     env_id='blackjack',

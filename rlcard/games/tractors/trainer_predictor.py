@@ -11,9 +11,9 @@ from torch import multiprocessing as mp
 from torch import nn
 import traceback
 from rlcard.utils.file_writer import FileWriter
-from rlcard.games.tractors.models import tractorModel
+
 from rlcard.games.tractors.models import tractorActor
-from .env.tractors_env_belief import run
+from .env.tractors_env import run
 
 from rlcard.games.tractors import learner_predictor_model
 
@@ -105,7 +105,7 @@ def compute_loss(logits, targets):
     return loss
 
 def train(flags):
-    if not flags.actor_device_cpu or flags.training_device != 'cpu':
+    if not hasattr(flags, 'actor_device_cpu') or flags.training_device != 'cpu':
         if not torch.cuda.is_available():
             raise AssertionError("CUDA not available. If you have GPUs, please specify the ID after `--gpu_devices`. Otherwise, please train with CPU with `python3 train.py --actor_device_cpu --training_device cpu`")
     plogger = FileWriter(
@@ -119,7 +119,7 @@ def train(flags):
     T = flags.unroll_length
     B = flags.batch_size
 
-    if flags.actor_device_cpu:
+    if hasattr(flags, 'actor_device_cpu'):
         device_iterator = ['cpu']
     else:
         device_iterator = range(flags.num_actor_devices)
@@ -128,7 +128,7 @@ def train(flags):
     # Initialize actor models
     actors = {}
     for device in device_iterator:
-        model = tractorActor(device=device, flags=flags)
+        model = tractorActor(device=device, args=flags)
         model.share_memory()
         model.eval()
         actors[device] = model
@@ -147,10 +147,10 @@ def train(flags):
         full_queue[device] = ctx.SimpleQueue()
 
     # Learner model for training
-    learner_actor = {'predictor':tractorActor(device=device, flags=flags)}
+    learner_actor = {'predictor':tractorActor(device=device, args=flags)}
 
     # model optimizer
-    optimizers = {'predictor':learner_predictor_model.create_optimizer()}
+    optimizers = {'predictor':learner_predictor_model.create_optimizer(lr=flags.lr, learner_model=learner_actor['predictor'].get_model('predictor'))}
     
 
     # Stat Keys
@@ -168,7 +168,7 @@ def train(flags):
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
         for k in ['predictor']:
-            assert learner_actor[k].load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
+            assert learner_actor[k].get_model('predictor').load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
                 actors[device].load_state_dict(k, checkpoint_states["model_state_dict"][k])
@@ -194,7 +194,7 @@ def train(flags):
     def batch_and_learn_predictor_model(i, device, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
         nonlocal frames, model_frames, stats
-        while frames < flags.total_frames:
+        while frames['predictor'] < flags.total_frames:
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
             _stats = learner_predictor_model.learn(actors, learner_actor, batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
      
@@ -229,12 +229,12 @@ def train(flags):
             return
         log.info('Saving checkpoint to %s', checkpointpath)
         torch.save({
-            'model_state_dict': {k: learner_actor[k].state_dict() for k in learner_actor},
+            'model_state_dict': {k: learner_actor[k].get_model('predictor').state_dict() for k in learner_actor},
             'optimizer_state_dict': {k: optimizers[k].state_dict() for k in optimizers},
             "stats": stats,
             'flags': vars(flags),
-            'frames': frames,
-            'model_frames': model_frames
+            'frames': frames['predictor'],
+            'model_frames': model_frames['predictor']
         }, checkpointpath)
 
         # Save the weights for evaluation purpose
@@ -247,8 +247,8 @@ def train(flags):
     timer = timeit.default_timer
     try:
         last_checkpoint_time = timer() - flags.save_interval * 60
-        while frames < flags.total_frames:
-            start_frames = frames
+        while frames['predictor'] < flags.total_frames:
+            start_frames = frames['predictor']
             position_start_frames = {k: model_frames[k] for k in model_frames}
             start_time = timer()
             time.sleep(5)
@@ -258,7 +258,7 @@ def train(flags):
                 last_checkpoint_time = timer()
             end_time = timer()
 
-            fps = (frames - start_frames) / (end_time - start_time)
+            fps = (frames['predictor'] - start_frames) / (end_time - start_time)
             fps_log.append(fps)
             if len(fps_log) > 24:
                 fps_log = fps_log[1:]
@@ -266,7 +266,7 @@ def train(flags):
 
             position_fps = {k:(model_frames[k]-position_start_frames[k])/(end_time-start_time) for k in model_frames}
             log.info('After %i (predictor:%i) frames: @ %.1f fps (avg@ %.1f fps) (predictor:%.1f) Stats:%s\n',
-                     frames,
+                     frames['predictor'],
                      model_frames['predictor'],
                      fps,
                      fps_avg,
