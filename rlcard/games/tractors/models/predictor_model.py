@@ -53,12 +53,19 @@ class Predictor(nn.Module):
         # optional small critic for internal eval (not used necessarily)
         
     def forward(self, state_feat):
-        # h = self.obs_proj(state_feat)         # [B, hidden_dim]
         play_card_history_feat = state_feat['history_play_card']#历史出牌
         play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
+        played_card_history_feat=state_feat['history_played_card']#已出过的牌
         bid_card_history_feat = state_feat['history_bid_card']#報主記錄
         bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
+        
+        #当前回合牌
+        play_card_round_feat = state_feat['round_play_card']
+        play_seat_round_feat = state_feat['round_play_seat']
+
         score_card_feat = state_feat['score_card']#分數牌
+        score_remain_card_feat = state_feat['remain_score_card']#分數牌
+        my_seat_feat = state_feat['my_seat']#我的座位号
 
         
         play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)

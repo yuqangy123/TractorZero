@@ -15,7 +15,7 @@ from rlcard.games.tractors.models import tractorModel
 from rlcard.games.tractors.models import tractorActor
 from .env.tractors_env_belief import run
 
-from rlcard.games.tractors import learner_cover_model
+from rlcard.games.tractors import learner_predictor_model
 
 
 # from .utils import get_batch, log, create_env, create_buffers, create_optimizers, act
@@ -29,7 +29,7 @@ log.propagate = False
 log.addHandler(shandle)
 log.setLevel(logging.INFO)
 
-mean_episode_return_buf = {p:deque(maxlen=100) for p in ['conver', 'player']}
+mean_episode_return_buf = {p:deque(maxlen=100) for p in ['perdictor']}
 
 #创建共享经验池
 # Buffers are used to transfer data between actor processes
@@ -134,27 +134,23 @@ def train(flags):
         actors[device] = model
 
     # Initialize buffers
-    player_buffer, cover_buffer = create_buffers(flags, device_iterator)
+    belief_buffer = create_buffers(flags, device_iterator)
    
     # Initialize queues
     actor_processes = []
     ctx = mp.get_context('spawn')
-    player_free_queue = {}
-    player_full_queue = {}
-    cover_free_queue = {}
-    cover_full_queue = {}
+    free_queue = {}
+    full_queue = {}
         
     for device in device_iterator:
-        player_free_queue[device] = ctx.SimpleQueue()
-        player_full_queue[device] = ctx.SimpleQueue()
-        cover_free_queue[device] = ctx.SimpleQueue()
-        cover_full_queue[device] = ctx.SimpleQueue()
+        free_queue[device] = ctx.SimpleQueue()
+        full_queue[device] = ctx.SimpleQueue()
 
     # Learner model for training
-    learner_playModel = tractorActor(device=device, flags=flags)
+    learner_actor = {'predictor':tractorActor(device=device, flags=flags)}
 
     # model optimizer
-    optimizers = {'cover':learner_cover_model.create_optimizer(), 'player':learner_player_model.create_optimizer()}
+    optimizers = {'predictor':learner_predictor_model.create_optimizer()}
     
 
     # Stat Keys
@@ -162,17 +158,17 @@ def train(flags):
         'mean_episode_return',
         'loss'
     ]
-    stats = {'cover':{k: 0 for k in stat_keys}, 'player':{k: 0 for k in stat_keys}}
-    model_frames = {'cover':0, 'player':0}
-    frames = {'cover':0, 'player':0}
+    stats = {'predictor':{k: 0 for k in stat_keys}}
+    model_frames = {'predictor':0}
+    frames = {'predictor':0}
 
     # Load models if any
     if flags.load_model and os.path.exists(checkpointpath):
         checkpoint_states = torch.load(
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
-        for k in ['cover', 'player']:
-            assert learner_playModel.load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
+        for k in ['predictor']:
+            assert learner_actor[k].load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
                 actors[device].load_state_dict(k, checkpoint_states["model_state_dict"][k])
@@ -183,10 +179,7 @@ def train(flags):
     
     for device in device_iterator:
         for m in range(flags.num_buffers):
-            player_free_queue[device].put(m)
-            player_free_queue[device].put(m)
-            cover_free_queue[device].put(m)
-            cover_free_queue[device].put(m)
+            free_queue[device].put(m)
 
     # Starting actor processes
     for device in device_iterator:
@@ -194,69 +187,49 @@ def train(flags):
         for i in range(flags.num_actors):
             actor_pro = ctx.Process(
                 target=run,
-                args=(i, device, actors[device], player_free_queue[device], player_full_queue[device], cover_free_queue[device], cover_full_queue[device], player_buffer[device], cover_buffer[device], flags))
+                args=(i, device, actors[device], free_queue[device], full_queue[device], belief_buffer[device], flags))
             actor_pro.start()
             actor_processes.append(actor_pro)
 
-    def batch_and_learn_cover_model(i, device, local_lock, position_lock, lock=threading.Lock()):
+    def batch_and_learn_predictor_model(i, device, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
         nonlocal frames, model_frames, stats
         while frames < flags.total_frames:
-            batch = learner_cover_model.get_batch(cover_free_queue[device], cover_full_queue[device], cover_buffer[device], flags, local_lock)
-            _stats = learner_cover_model.learn(actors, learner_playModel, batch, optimizers['cover'], device, flags, mean_episode_return_buf, position_lock)
+            batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
+            _stats = learner_predictor_model.learn(actors, learner_actor, batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
      
-
             with lock:
                 for k in _stats:
-                    stats['cover'][k] = _stats[k]
-                to_log = dict(frames=frames['cover'])
-                to_log.update({k: stats['cover'][k] for k in stat_keys})
+                    stats['predictor'][k] = _stats[k]
+                to_log = dict(frames=frames['predictor'])
+                to_log.update({k: stats['predictor'][k] for k in stat_keys})
                 plogger.log(to_log)
-                frames['cover'] += T * B
-                model_frames['cover'] += T * B
-    
-    def batch_and_learn_player_model(i, device, local_lock, position_lock, lock=threading.Lock()):
-        """Thread target for the learning process."""
-        nonlocal frames, model_frames, stats
-        while frames < flags.total_frames:
-            batch = get_batch(player_free_queue[device], player_full_queue[device], player_buffer[device], flags, local_lock)
-            _stats = learn_player_mdel(actors, learner_playModel, batch, flags, position_lock)
-
-            with lock:
-                for k in _stats:
-                    stats['player'][k] = _stats[k]
-                to_log = dict(frames=frames['player'])
-                to_log.update({k: stats['player'][k] for k in stat_keys})
-                plogger.log(to_log)
-                frames['player'] += T * B
-                model_frames['player'] += T * B
+                frames['predictor'] += T * B
+                model_frames['predictor'] += T * B
     
 
     threads = []
     data_locks = {}
     for device in device_iterator:
-        data_locks[device] = {'cover': threading.Lock(), 'player': threading.Lock()}
-    model_learn_locks = {'cover': threading.Lock(), 'player': threading.Lock()}
+        data_locks[device] = {'predictor': threading.Lock()}
+    model_learn_locks = {'predictor': threading.Lock()}
 
     for device in device_iterator:
         for i in range(flags.num_threads):
             # for position in ['landlord', 'landlord_up', 'landlord_down']:
             thread = threading.Thread(
-                target=batch_and_learn_cover_model, name='batch-and-learn-cover-model-%d' % i, args=(i, device, data_locks[device]['cover'], model_learn_locks['cover']))
+                target=batch_and_learn_predictor_model, name='batch-and-learn-predictor-model-%d' % i, args=(i, device, data_locks[device]['predictor'], model_learn_locks['predictor']))
             thread.start()
             threads.append(thread)
 
-            thread = threading.Thread(
-                target=batch_and_learn_player_model, name='batch-and-learn-player-model-%d' % i, args=(i, device, data_locks[device]['player'], model_learn_locks['player']))
-            thread.start()
-            threads.append(thread)
+            
     
     def checkpoint(frames):
         if flags.disable_checkpoint:
             return
         log.info('Saving checkpoint to %s', checkpointpath)
         torch.save({
-            'model_state_dict': {k: learner_playModel[k].state_dict() for k in learner_playModel},
+            'model_state_dict': {k: learner_actor[k].state_dict() for k in learner_actor},
             'optimizer_state_dict': {k: optimizers[k].state_dict() for k in optimizers},
             "stats": stats,
             'flags': vars(flags),
@@ -265,10 +238,10 @@ def train(flags):
         }, checkpointpath)
 
         # Save the weights for evaluation purpose
-        for position in ['landlord', 'landlord_up', 'landlord_down']:
+        for position in ['predictor']:
             model_weights_dir = os.path.expandvars(os.path.expanduser(
                 '%s/%s/%s' % (flags.savedir, flags.xpid, position+'_weights_'+str(frames)+'.ckpt')))
-            torch.save(learner_model.get_model(position).state_dict(), model_weights_dir)
+            torch.save(learner_actor[position].get_model(position).state_dict(), model_weights_dir)
 
     fps_log = []
     timer = timeit.default_timer
@@ -292,16 +265,12 @@ def train(flags):
             fps_avg = np.mean(fps_log)
 
             position_fps = {k:(model_frames[k]-position_start_frames[k])/(end_time-start_time) for k in model_frames}
-            log.info('After %i (L:%i U:%i D:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f U:%.1f D:%.1f) Stats:\n%s',
+            log.info('After %i (predictor:%i) frames: @ %.1f fps (avg@ %.1f fps) (predictor:%.1f) Stats:%s\n',
                      frames,
-                     model_frames['landlord'],
-                     model_frames['landlord_up'],
-                     model_frames['landlord_down'],
+                     model_frames['predictor'],
                      fps,
                      fps_avg,
-                     position_fps['landlord'],
-                     position_fps['landlord_up'],
-                     position_fps['landlord_down'],
+                     position_fps['predictor'],
                      pprint.pformat(stats))
 
     except KeyboardInterrupt:

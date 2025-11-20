@@ -50,9 +50,7 @@ def learn(actor_model,
 
     
     with lock:
-        opp_probs, bottom_prob = learn_model({'history_play_card':history_play_card, 'history_play_seat':history_play_seat,
-                                       'history_bid_card':history_bid_card, 'history_bid_seat':history_bid_seat}
-                                       )
+        opp_probs, bottom_prob = learn_model.predictCard(batch)
         loss_opp = sum(F.binary_cross_entropy(probs, lbl) for probs,lbl in zip(opp_probs, label_hand_card))
         loss_bottom = F.binary_cross_entropy(bottom_prob, label_public_card)
         loss = loss_opp + loss_bottom
