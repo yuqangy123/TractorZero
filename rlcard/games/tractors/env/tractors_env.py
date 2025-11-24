@@ -7,6 +7,9 @@ import logging, random
 import traceback
 from rlcard.envs import Env
 from rlcard.games.tractors.tractor_botzone import tractorGame as tractors
+import copy
+import os
+os.environ['PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT'] = '5.0'#设置环境变量增加超时时间
 
 shandle = logging.StreamHandler()
 shandle.setFormatter(
@@ -114,6 +117,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
         #回合出牌緩存
         round_play_card = []
         round_play_seat = []
+        round_times = 0
 
 
         # round_player_remain_card_num = [0,0,0,0]
@@ -193,31 +197,32 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     #已出牌
                     history_played_card = cards2matrix([], inning_level, inning_major)
                     #叫主轨迹信息
-                    history_bid_card = []
-                    history_bid_seat = []
-                    for traj in bid_trajectory:
-                        pos_mat = np.zeros(__PLAYER_COUNT__)
-                        pos_mat[traj[0]-1] = 1
-                        history_bid_seat.append(pos_mat)
-                        history_bid_card.append(cards2matrix[traj[1], inning_level, inning_major])
-                        
+                    history_bid_card = [cards2matrix([], inning_level, inning_major) for _ in range(2)]
+                    history_bid_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(2)]
+                    for i,traj in enumerate(bid_trajectory):
+                        history_bid_seat[i][traj[0]-1] = 1.0
+                        history_bid_card[i] = cards2matrix(traj[1], inning_level, inning_major)
                     
-
+                    round_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
+                    round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
+                    history_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
+                    history_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
+                    round_times = 0
+                
+                    # obs_x['public_card'] = cards2matrix(agent_output, inning_level, inning_major)
+                    # obs_x['history_play_card'] = []
+                    # obs_x['history_play_seat'] = []
+                    # obs_x['played_card'] = cards2matrix([], inning_level, inning_major)#历史所有已出牌
+                    # obs_x['history_bid_card'] = []
+                    # obs_x['history_bid_seat'] = []
+                    # obs_x['score_card'] = history_score_card#历史分得分牌
+                    # obs_x['remain_score_card'] = cards2matrix(history_remain_score_card, inning_level, inning_major)#历史剩余分数牌
+                    # obs_x['hand_card'] = []
                     
-                    obs_x['public_card'] = cards2matrix(agent_output, inning_level, inning_major)
-                    obs_x['history_play_card'] = []
-                    obs_x['history_play_seat'] = []
-                    obs_x['played_card'] = cards2matrix([], inning_level, inning_major)#历史所有已出牌
-                    obs_x['history_bid_card'] = []
-                    obs_x['history_bid_seat'] = []
-                    obs_x['score_card'] = history_score_card#历史分得分牌
-                    obs_x['remain_score_card'] = cards2matrix(history_remain_score_card, inning_level, inning_major)#历史剩余分数牌
-                    obs_x['hand_card'] = []
-                    
-                    for bid_traj in bid_trajectory:
-                        obs_x['history_bid_card'].append(cards2matrix(bid_traj[1], inning_level, inning_major))
-                        obs_x['history_bid_seat'].append(np.zeros(__PLAYER_COUNT__))
-                        obs_x['history_bid_seat'][len(obs_x['history_bid_seat'])-1][bid_traj[0]-1] = 1
+                    # for bid_traj in bid_trajectory:
+                    #     obs_x['history_bid_card'].append(cards2matrix(bid_traj[1], inning_level, inning_major))
+                    #     obs_x['history_bid_seat'].append(np.zeros(__PLAYER_COUNT__))
+                    #     obs_x['history_bid_seat'][len(obs_x['history_bid_seat'])-1][bid_traj[0]-1] = 1
 
 
                 #出牌阶段
@@ -226,52 +231,52 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     
 
                     #存储经验回放
-                    history_play_card_buff.append(np.array(history_play_card))
-                    history_play_seat_buff.append(np.array(history_play_seat))
-                    history_played_card_buff.append(history_played_card)
-                    history_bid_card_buff.append(history_bid_card)
-                    history_bid_seat_buff.append(history_bid_seat)
-                    round_play_card_buff.append(round_play_card)
-                    round_play_seat_buff.append(round_play_seat)
-                    score_card_buff.append(history_score_card)
-                    remain_score_card_buff.append(history_remain_score_card)
+                    history_play_card_buff.append(copy.deepcopy(history_play_card))
+                    history_play_seat_buff.append(copy.deepcopy(history_play_seat))
+                    history_played_card_buff.append(copy.deepcopy(history_played_card))
+                    history_bid_card_buff.append(copy.deepcopy(history_bid_card))
+                    history_bid_seat_buff.append(copy.deepcopy(history_bid_seat))
+                    round_play_card_buff.append(copy.deepcopy(round_play_card))
+                    round_play_seat_buff.append(copy.deepcopy(round_play_seat))
+                    score_card_buff.append(copy.deepcopy(history_score_card))
+                    remain_score_card_buff.append(copy.deepcopy(history_remain_score_card))
                     my_seat_buff.append(play_pos)
                     public_card_buff.append(history_public_card)
                     hand_cards_buff.append([cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)])
-
+                    
                     
                     #执行游戏出牌
                     history_curr = env.getCurrRoundPlayHistory()
                     hold = env.getPlayerHoldCards(play_pos)
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
-
-                    
-
                     playcard_mtrx = cards2matrix(response[1], inning_level, inning_major)
+                    
                     #局内累计信息
-                    history_play_card.append(playcard_mtrx)
-                    history_play_seat.append(np.zeros(__PLAYER_COUNT__))
-                    history_play_seat[len(history_play_seat)-1][play_pos-1] = 1
+                    history_play_card[round_times] = playcard_mtrx
+                    history_play_seat[round_times][play_pos-1] = 1.0
                     history_played_card += playcard_mtrx
 
                     # 回合内信息
-                    round_play_card.append(playcard_mtrx)
-                    round_play_seat.append(np.zeros(__PLAYER_COUNT__))
-                    round_play_seat[len(round_play_seat)-1][play_pos-1] = 1
+                    round_play_card[round_times] = playcard_mtrx
+                    round_play_seat[round_times][play_pos-1] = 1.0
 
                     #分牌
                     play_score_card = playcard_mtrx * history_remain_score_card
                     history_score_card += play_score_card
                     history_remain_score_card -= play_score_card
 
+                    round_times += 1
 
 
                 #一回合结束
                 elif stage == 'roundend' or stage == 'gameend':
-                    round_play_card = []
-                    round_play_seat = []
-
+                    round_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
+                    round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
+                    history_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
+                    history_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
+                    round_times = 0
+                    
                     #存储经验回放
                     while len(hand_cards_buff) > T:
                         index = free_queue.get()
@@ -279,18 +284,18 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             break
                         for t in range(T):
                             # buffers是tensor history_play_card_buff是array
-                            buffers['history_play_card'][index][t, ...] = history_play_card_buff[t]
-                            buffers['history_play_seat'][index][t, ...] = history_play_seat_buff[t]
-                            buffers['history_played_card'][index][t, ...] = history_played_card_buff[t]
-                            buffers['history_bid_card'][index][t, ...] = history_bid_card_buff[t]
-                            buffers['history_bid_seat'][index][t, ...] = history_bid_seat_buff[t]
-                            buffers['round_play_card'][index][t, ...] = round_play_card_buff[t]
-                            buffers['round_play_seat'][index][t, ...] = round_play_seat_buff[t]
-                            buffers['score_card'][index][t, ...] = score_card_buff[t]
-                            buffers['remain_score_card'][index][t, ...] = remain_score_card_buff[t]
-                            buffers['my_seat'][index][t, ...] = my_seat_buff[t]
-                            buffers['public_card'][index][t, ...] = public_card_buff[t]
-                            buffers['hand_card'][index][t, ...] = hand_cards_buff[t]
+                            buffers['history_play_card'][index][t, ...] = torch.tensor(history_play_card_buff[t])
+                            buffers['history_play_seat'][index][t, ...] = torch.tensor(history_play_seat_buff[t])
+                            buffers['history_played_card'][index][t, ...] = torch.tensor(history_played_card_buff[t])
+                            buffers['history_bid_card'][index][t, ...] = torch.tensor(history_bid_card_buff[t])
+                            buffers['history_bid_seat'][index][t, ...] = torch.tensor(history_bid_seat_buff[t])
+                            buffers['round_play_card'][index][t, ...] = torch.tensor(round_play_card_buff[t])
+                            buffers['round_play_seat'][index][t, ...] = torch.tensor(round_play_seat_buff[t])
+                            buffers['score_card'][index][t, ...] = torch.tensor(score_card_buff[t])
+                            buffers['remain_score_card'][index][t, ...] = torch.tensor(remain_score_card_buff[t])
+                            buffers['my_seat'][index][t, ...] = torch.tensor(my_seat_buff[t])
+                            buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
+                            buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
                             
                         full_queue.put(index)
                         history_play_card_buff = history_play_card_buff[T:]
