@@ -199,6 +199,8 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     #叫主轨迹信息
                     history_bid_card = [cards2matrix([], inning_level, inning_major) for _ in range(2)]
                     history_bid_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(2)]
+                    if len(bid_trajectory)>2:
+                        pass
                     for i,traj in enumerate(bid_trajectory):
                         history_bid_seat[i][traj[0]-1] = 1.0
                         history_bid_card[i] = cards2matrix(traj[1], inning_level, inning_major)
@@ -251,7 +253,9 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
                     playcard_mtrx = cards2matrix(response[1], inning_level, inning_major)
-                    
+                    if np.sum(playcard_mtrx) == 0:
+                        raise ValueError("出牌报错，该出牌为空")
+                        
                     #局内累计信息
                     history_play_card[round_times] = playcard_mtrx
                     history_play_seat[round_times][play_pos-1] = 1.0
@@ -271,10 +275,12 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
 
                 #一回合结束
                 elif stage == 'roundend' or stage == 'gameend':
+                    #重置回合信息
                     round_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
                     round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
                     history_play_card = [cards2matrix([], inning_level, inning_major) for _ in range(4)]
                     history_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(4)]
+                    if stage == 'gameend': bid_trajectory = []
                     round_times = 0
                     
                     #存储经验回放
@@ -297,6 +303,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
                             buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
                             
+                        # print('full_queue.put', index)
                         full_queue.put(index)
                         history_play_card_buff = history_play_card_buff[T:]
                         history_play_seat_buff = history_play_seat_buff[T:]

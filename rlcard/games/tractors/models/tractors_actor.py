@@ -8,6 +8,7 @@ from rlcard.games.tractors.models.cover_model import CoverModel
 from rlcard.games.tractors.models.player_model import PPOClip as PlayModel
 from rlcard.games.tractors.models.predictor_model import Predictor as PredictModel
 from rlcard.games.tractors.utils import *
+import torch as t
 
 ActionNumber = 2
 # torch.set_num_threads(8)
@@ -22,7 +23,10 @@ class TractorsActor():
         # self.__models['player'] = PlayModel(args).to(device)
         
         # self, hidden_dim, num_opps
-        self.__models['predictor'] = PredictModel().to(device)
+        _predictmodel = PredictModel()
+        _predictmodel.toDevice(device != 'cpu' and t.device('cuda:'+str(device)) or device)
+        self.__models['predictor'] = _predictmodel
+        pass
 
 
     # def bidMajorCard(self, deal_card, hold_card, bid_card, own_pos, called_list, major, level):
@@ -79,18 +83,18 @@ class TractorsActor():
         return out_cards
 
     def predictCard(self, input_x):
-        history_play_card=input_x['history_play_card']
-        history_play_seat=input_x['history_play_seat']
-        history_played_card=input_x['history_played_card']
-        history_bid_card=input_x['history_bid_card']
-        history_bid_seat=input_x['history_bid_seat']   
-        round_play_card=input_x['round_play_card']
-        round_play_seat=input_x['round_play_seat']
-        score_card=input_x['score_card']
-        remain_score_card=input_x['remain_score_card']
-        my_seat=input_x['my_seat']
-        mask_card_mat = history_played_card
-        predect_card_mat = self.__models['predict'](input_x, mask_card_mat)
+        # history_play_card=input_x['history_play_card']
+        # history_play_seat=input_x['history_play_seat']
+        # history_played_card=input_x['history_played_card']
+        # history_bid_card=input_x['history_bid_card']
+        # history_bid_seat=input_x['history_bid_seat']   
+        # round_play_card=input_x['round_play_card']
+        # round_play_seat=input_x['round_play_seat']
+        # score_card=input_x['score_card']
+        # remain_score_card=input_x['remain_score_card']
+        # my_seat=input_x['my_seat']
+        # mask_card_mat = history_played_card
+        predect_card_mat = self.__models['predictor'](input_x)
         return predect_card_mat
     def load_state_dict(self, model_name, dict):
         if model_name in self.__models:

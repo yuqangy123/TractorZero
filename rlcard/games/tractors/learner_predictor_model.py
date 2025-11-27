@@ -40,26 +40,33 @@ def learn(actor_model,
           mean_episode_return_buf,
           lock):
     
-    label_hand_card = batch['play_hand_card'].to(device)
+    label_hand_card = batch['hand_card'].to(device)
     label_public_card = batch['public_card'].to(device)
 
-    
+    T = flags.unroll_length
+    loss_total = 0.0
     with lock:
-        opp_probs, bottom_prob = learn_model.predictCard(batch)
-        loss_opp = sum(F.binary_cross_entropy(probs, lbl) for probs,lbl in zip(opp_probs, label_hand_card))
-        loss_bottom = F.binary_cross_entropy(bottom_prob, label_public_card)
-        loss = loss_opp + loss_bottom
-        
+        for t in range(T):
+            one_batch = {
+                key: value[t] for key, value in batch.items()
+            }
+            opp_probs, bottom_prob = learn_model.predictCard(one_batch)
+            loss_opp = sum(F.binary_cross_entropy(probs, lbl) for probs,lbl in zip(opp_probs, label_hand_card))
+            loss_bottom = F.binary_cross_entropy(bottom_prob, label_public_card)
+            loss = loss_opp + loss_bottom
+            loss_total += loss.item()
+            
+            
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(learn_model.get_model('predictor').parameters(), flags.max_grad_norm)
+            optimizer.step()
+
+            actor_model.get_model('predictor').load_state_dict(learn_model.get_model('predictor').state_dict())
+
         stats = {
             'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['predictor']])).item(),
-            'loss': loss.item(),
+            'loss': loss_total.item()/T,
         }
         
-        optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(learn_model.parameters(), flags.max_grad_norm)
-        optimizer.step()
-
-        actor_model.get_model('predictor').load_state_dict(learn_model.get_model('predictor').state_dict())
-
         return stats

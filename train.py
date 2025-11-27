@@ -77,8 +77,8 @@ if __name__ == '__main__':
         type=int,
     )
     parser.add_argument(
-        '--batch_size',
-        default=64,
+        '--batch_size',#batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
+        default=32,
         type=int,
     )
     parser.add_argument(

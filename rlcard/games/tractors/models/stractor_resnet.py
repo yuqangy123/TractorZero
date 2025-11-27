@@ -17,10 +17,11 @@ self.resnet_my_card = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, downsample=None):
         super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=0, bias=False)
+        ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.LeakyReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=0, bias=False)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.downsample = downsample
 
@@ -43,7 +44,7 @@ class ResidualBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers=[2,2,2,2], in_channels=2, hidden_channels=[14,28,56,112], kernel_size=3, stride=1, padding=0):
+    def __init__(self, block, layers=[2,2,2,2], in_channels=2, out_channels=2, hidden_channels=[14,28,56,112], kernel_size=3, stride=1, padding=0):
         super(ResNet, self).__init__()
         self.hidden_channels = hidden_channels[0]
 
@@ -60,8 +61,13 @@ class ResNet(nn.Module):
 
         # 全局平均池化和全连接层
         # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        # self.fc = nn.Linear(112, 1)
+        #融合卷积层
+        self.conv_fusion = nn.Conv2d(hidden_channels[len(hidden_channels)-1], out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
         self._init_lstm_weights()
+
+    def toDevice(self, device):
+        for i in range(len(self.reslayers)):
+            self.reslayers[i].to(device)
 
     def _init_lstm_weights(self):
         """初始化LSTM权重"""
@@ -98,11 +104,11 @@ class ResNet(nn.Module):
         x = self.relu(x)
         # x = self.maxpool(x)
 
-        for i in range(self.reslayers):
+        for i in range(len(self.reslayers)):
             x = self.reslayers[i](x)
             
         # x = self.avgpool(x)
+        x = self.conv_fusion(x)
         x = torch.flatten(x, 1)
-        # x = self.fc(x)
         return x
     

@@ -35,18 +35,24 @@ class Predictor(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        num_opps = 4
+        self.num_opps = 4
         hidden_dim = 256
-        #历史出牌时序特征, 2*4*15维出牌特征+4维座位号特征
-        self.lstm = nn.LSTM(112+4, hidden_dim, batch_first=True)
+        
 
-        # 手牌特征提取器 (2,4,15) -> 112维
-        self.card_encoder = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
+        # 手牌特征提取器 (2,4,15) -> (hidden_channels,2,4,5) 
+        ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
+        self.card_encoder = ResNet(ResidualBlock, [2, 2, 2, 2], hidden_channels=[14,28,56,112], in_channels=2,out_channels=2, kernel_size=3, padding=1, stride=1)
+
+
+        #历史出牌时序特征, 接着 card_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
+        self.lstm = nn.LSTM(2*4*15+4, hidden_dim, batch_first=True)
+
 
         # Assuming card_count = 2*4*15 = 112
         self.card_shape = (2, 4, 15)
         card_count = 2*4*15
-        self.opp_heads = nn.ModuleList([nn.Linear(hidden_dim, card_count) for _ in range(num_opps)])
+        # 2924是所有特征提取之后展开的长度
+        self.opp_heads = nn.ModuleList([nn.Linear(hidden_dim, card_count) for _ in range(self.num_opps)])
         self.bottom_head = nn.Linear(hidden_dim, card_count)
 
         # important features head (multi-label), e.g. 16 dims
@@ -59,7 +65,6 @@ class Predictor(nn.Module):
         played_card_history_feat=state_feat['history_played_card']#已出过的牌
         bid_card_history_feat = state_feat['history_bid_card']#報主記錄
         bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
-        
         #当前回合牌
         play_card_round_feat = state_feat['round_play_card']
         play_seat_round_feat = state_feat['round_play_seat']
@@ -68,17 +73,32 @@ class Predictor(nn.Module):
         score_remain_card_feat = state_feat['remain_score_card']#分數牌
         my_seat_feat = state_feat['my_seat']#我的座位号
 
-        
+        #多次动作组成的一轮数据，将多次打平成第三维
+        b, a, c, d, e = play_card_history_feat.shape
+        play_card_history_feat = play_card_history_feat.reshape(b*a, c, d, e)
+        b, a, c = play_seat_history_feat.shape
+        play_seat_history_feat = play_seat_history_feat.reshape(b*a, c)
+        b, a, c, d, e = bid_card_history_feat.shape
+        bid_card_history_feat = bid_card_history_feat.reshape(b*a, c, d, e)
+        b, a, c = bid_seat_history_feat.shape
+        bid_seat_history_feat = bid_seat_history_feat.reshape(b*a, c)
+        b, a, c, d, e = play_card_round_feat.shape
+        play_card_round_feat = play_card_round_feat.reshape(b*a, c, d, e)
+        b, a, c = play_seat_round_feat.shape
+        play_seat_round_feat = play_seat_round_feat.reshape(b*a, c)
+
+
         play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
-        play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=0)
+        play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)#将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
+        play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
         h_play, (_, _) = self.lstm(play_history_feat)
 
         bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
-        bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=0)
+        bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
         h_bid, (_, _) = self.lstm(bid_history_feat)
 
         round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
-        round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=0)
+        round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
         h_round, (_, _) = self.lstm(round_history_feat)
 
         played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
@@ -86,7 +106,10 @@ class Predictor(nn.Module):
         score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
 
         #特征融合
-        in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat])
+        h_play = h_play.reshape(my_seat_feat.shape[0], -1)
+        h_round = h_round.reshape(my_seat_feat.shape[0], -1)
+        h_bid = h_bid.reshape(my_seat_feat.shape[0], -1)
+        in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat], dim=-1)
 
         opp_logits = [head(in_feat) for head in self.opp_heads]   # each [B, seat, CARD_COUNT]
         bottom_logits = self.bottom_head(in_feat)                 # [B, CARD_COUNT]
@@ -113,6 +136,9 @@ class Predictor(nn.Module):
 
         return opp_probs, bottom_prob
     
+    def toDevice(self, device):
+        self.to(device)
+        self.card_encoder.toDevice(device)
 
 
 # ---------------------------

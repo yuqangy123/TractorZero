@@ -50,20 +50,20 @@ def create_buffers(flags, device_iterator):
 
         #隐藏信息预测模型buffer
         specs = dict(
-            history_play_card=dict(size=(T,4,2,4,15), dtype=torch.int8),
-            history_play_seat=dict(size=(T,4,4), dtype=torch.int8),
-            history_played_card=dict(size=(T,2,4,15), dtype=torch.int8),
-            history_bid_card=dict(size=(T,2,2,4,15), dtype=torch.int8),
-            history_bid_seat=dict(size=(T,2,4), dtype=torch.int8),
-            round_play_card=dict(size=(T,4,2,4,15), dtype=torch.int8),
-            round_play_seat=dict(size=(T,4,4), dtype=torch.int8),
+            history_play_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
+            history_play_seat=dict(size=(T,4,4), dtype=torch.float32),
+            history_played_card=dict(size=(T,2,4,15), dtype=torch.float32),
+            history_bid_card=dict(size=(T,2,2,4,15), dtype=torch.float32),
+            history_bid_seat=dict(size=(T,2,4), dtype=torch.float32),
+            round_play_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
+            round_play_seat=dict(size=(T,4,4), dtype=torch.float32),
 
-            score_card=dict(size=(T,2,4,15), dtype=torch.int8),
-            remain_score_card=dict(size=(T,2,4,15), dtype=torch.int8),
-            my_seat=dict(size=(T,4), dtype=torch.int8),
+            score_card=dict(size=(T,2,4,15), dtype=torch.float32),
+            remain_score_card=dict(size=(T,2,4,15), dtype=torch.float32),
+            my_seat=dict(size=(T,4), dtype=torch.float32),
             # label
-            public_card=dict(size=(T,2,4,15), dtype=torch.int8),
-            hand_card=dict(size=(T,4,2,4,15), dtype=torch.int8),
+            public_card=dict(size=(T,2,4,15), dtype=torch.float32),
+            hand_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
         )
         _buffers: Buffers = {key: [] for key in specs}
         for _ in range(flags.num_buffers):
@@ -196,7 +196,7 @@ def train(flags):
         nonlocal frames, model_frames, stats
         while frames['predictor'] < flags.total_frames:
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
-            _stats = learner_predictor_model.learn(actors, learner_actor, batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
+            _stats = learner_predictor_model.learn(actors, learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
      
             with lock:
                 for k in _stats:
