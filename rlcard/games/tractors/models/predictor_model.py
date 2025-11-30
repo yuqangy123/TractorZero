@@ -89,7 +89,18 @@ class Predictor(nn.Module):
 
 
         play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
-        play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)#将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
+        '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
+        再将原来4个人的座位号展平，再将两个特征拼接在一起，
+        也可以使用交替凭借，
+        不过，需要注意的是，在实际应用场景中，交替拼接可能不如传统的特征拼接有效，因为：
+        语义分离：交替拼接可能会破坏特征原有的语义结构
+        网络学习难度增加：神经网络可能更难从交错特征中学习模式
+        维度不匹配问题：如果两个张量的最后一维大小不同，交错拼接会更加复杂
+        这种拼接方式让LSTM能够：
+        独立学习卡牌出牌和座位位置的时间依赖关系
+        必要时分别关注卡牌特征和座位特征
+        清晰区分不同类型的特征'''
+        # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
         play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
         h_play, (_, _) = self.lstm(play_history_feat)
 
