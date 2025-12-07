@@ -44,7 +44,7 @@ class ResidualBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers=[2,2,2,2], in_channels=2, out_channels=2, hidden_channels=[14,28,56,112], kernel_size=3, stride=1, padding=0):
+    def __init__(self, block, layers=[2,2,2,2], in_channels=2, out_dim=256, hidden_channels=[14,28,56,112], kernel_size=3, stride=1, padding=0):
         super(ResNet, self).__init__()
         self.hidden_channels = hidden_channels[0]
 
@@ -62,7 +62,7 @@ class ResNet(nn.Module):
         # 全局平均池化和全连接层
         # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         #融合卷积层
-        self.conv_fusion = nn.Conv2d(hidden_channels[len(hidden_channels)-1], out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
+        self.conv_fusion = nn.Linear(hidden_channels[len(hidden_channels)-1]*4*15, out_dim)#nn.Conv2d(hidden_channels[len(hidden_channels)-1], out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
         self._init_lstm_weights()
 
     def toDevice(self, device):
@@ -99,6 +99,14 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        x_dim = len(x.shape)
+        if x_dim == 5:
+            #将回合维度数据合并到bath批次维度
+            batch_size = x.size(0)
+            seq_len = x.size(1)
+             # 重塑为 [batch_size*seq_len, 2, 4, 15]
+            x = x.view(-1, x.size(2), x.size(3), x.size(4))
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -107,8 +115,13 @@ class ResNet(nn.Module):
         for i in range(len(self.reslayers)):
             x = self.reslayers[i](x)
             
-        # x = self.avgpool(x)
-        x = self.conv_fusion(x)
+        # 展平特征图
         x = torch.flatten(x, 1)
+        # 应用融合层
+        x = self.conv_fusion(x)
+        
+        if x_dim == 5:
+            # 重塑回批次格式 [batch_size, seq_len, out_dim]
+            x = x.view(batch_size, seq_len, -1)
         return x
     

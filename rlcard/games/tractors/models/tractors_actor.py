@@ -94,8 +94,8 @@ class TractorsActor():
         # remain_score_card=input_x['remain_score_card']
         # my_seat=input_x['my_seat']
         # mask_card_mat = history_played_card
-        predect_card_mat = self.__models['predictor'](input_x)
-        return predect_card_mat
+        opp_probs, bottom_prob = self.__models['predictor'](input_x)
+        return opp_probs, bottom_prob
     def load_state_dict(self, model_name, dict):
         if model_name in self.__models:
             self.__models[model_name].load_checkpoint(dict)

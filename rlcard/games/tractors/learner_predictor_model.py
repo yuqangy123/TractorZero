@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
+CUDA_LAUNCH_BLOCKING=1
+TORCH_USE_CUDA_DSA=True
 def create_optimizer(
     lr,
     learner_model
@@ -39,10 +40,7 @@ def learn(actor_model,
           flags,
           mean_episode_return_buf,
           lock):
-    
-    label_hand_card = batch['hand_card'].to(device)
-    label_public_card = batch['public_card'].to(device)
-
+        
     T = flags.unroll_length
     loss_total = 0.0
     with lock:
@@ -50,8 +48,17 @@ def learn(actor_model,
             one_batch = {
                 key: value[t] for key, value in batch.items()
             }
+            label_hand_card = one_batch['hand_card'].to(device)
+            label_public_card = one_batch['public_card'].to(device)
+
             opp_probs, bottom_prob = learn_model.predictCard(one_batch)
-            loss_opp = sum(F.binary_cross_entropy(probs, lbl) for probs,lbl in zip(opp_probs, label_hand_card))
+            # loss_opp = [F.binary_cross_entropy(prob, lbl) for prob,lbl in zip(opp_probs, label_hand_card)]
+            loss_opp = F.binary_cross_entropy(
+                opp_probs, 
+                label_hand_card,
+                reduction='mean'  # 对所有元素求平均
+            )
+            # loss_opp = sum(F.binary_cross_entropy(prob, lbl) for prob,lbl in zip(opp_probs, label_hand_card))
             loss_bottom = F.binary_cross_entropy(bottom_prob, label_public_card)
             loss = loss_opp + loss_bottom
             loss_total += loss.item()

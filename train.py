@@ -73,7 +73,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--unroll_length',
-        default=100,
+        default=16,
         type=int,
     )
     parser.add_argument(
@@ -106,6 +106,8 @@ if __name__ == '__main__':
         default=False,
         type=bool,
     )
+    parser.add_argument('--max_grad_norm', default=40., type=float,
+        help='Max norm of gradients')
     
 
     args = parser.parse_args()

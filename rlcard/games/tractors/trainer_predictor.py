@@ -50,8 +50,8 @@ def create_buffers(flags, device_iterator):
 
         #隐藏信息预测模型buffer
         specs = dict(
-            history_play_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
-            history_play_seat=dict(size=(T,4,4), dtype=torch.float32),
+            history_play_card=dict(size=(T,15,4,2,4,15), dtype=torch.float32),
+            history_play_seat=dict(size=(T,15,4,4), dtype=torch.float32),
             history_played_card=dict(size=(T,2,4,15), dtype=torch.float32),
             history_bid_card=dict(size=(T,2,2,4,15), dtype=torch.float32),
             history_bid_seat=dict(size=(T,2,4), dtype=torch.float32),
@@ -61,6 +61,8 @@ def create_buffers(flags, device_iterator):
             score_card=dict(size=(T,2,4,15), dtype=torch.float32),
             remain_score_card=dict(size=(T,2,4,15), dtype=torch.float32),
             my_seat=dict(size=(T,4), dtype=torch.float32),
+            banker_seat=dict(size=(T,4), dtype=torch.float32),
+            
             # label
             public_card=dict(size=(T,2,4,15), dtype=torch.float32),
             hand_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
