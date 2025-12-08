@@ -29,7 +29,7 @@ log.propagate = False
 log.addHandler(shandle)
 log.setLevel(logging.INFO)
 
-mean_episode_return_buf = {p:deque(maxlen=100) for p in ['perdictor']}
+mean_episode_return_buf = {p:deque(maxlen=100) for p in ['predictor']}
 
 #创建共享经验池
 # Buffers are used to transfer data between actor processes
@@ -157,7 +157,7 @@ def train(flags):
 
     # Stat Keys
     stat_keys = [
-        'mean_episode_return',
+        # 'mean_episode_return',
         'loss'
     ]
     stats = {'predictor':{k: 0 for k in stat_keys}}
@@ -198,7 +198,7 @@ def train(flags):
         nonlocal frames, model_frames, stats
         while frames['predictor'] < flags.total_frames:
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
-            _stats = learner_predictor_model.learn(actors, learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
+            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
      
             with lock:
                 for k in _stats:
