@@ -1629,8 +1629,9 @@ class tractorGame():
             # self.pointorder = ['2', '3', '4', '5', '7', '8', '9', '0', 'J', 'Q', 'K', 'A']
 
                    
-            ret = self.getTypePoke(poker_deck, level)
+            ret = self.getTypePoke(poker_deck, level, type = ["single","pair","tractor"])#为简化游戏环境，去除甩牌牌型
             flattened_ret = [poke for pokes in ret.values() for poke in pokes]
+            # print('合法出牌', flattened_ret)
             ret = self.PokerList2Num(flattened_ret, deck)
             # return ret[random.randint(0, len(ret))]
             return ret
@@ -1861,7 +1862,7 @@ class tractorGame():
                     if subout not in sout:
                         pass
 
-
+        # print('合法出牌：', out1)
         ret = self.PokerList2Num(out1, deck)
         return ret
     

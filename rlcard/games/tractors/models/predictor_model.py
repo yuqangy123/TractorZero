@@ -22,6 +22,43 @@ def entropy_of_probs(p: torch.Tensor, eps=1e-12):
     return -torch.sum(p * torch.log(p + eps), dim=-1)  # [B]
 
 # ---------------------------
+# Attention Mechanism
+# ---------------------------
+class AttentionLayer(nn.Module):
+    def __init__(self, input_dim, attention_dim):
+        super(AttentionLayer, self).__init__()
+        self.input_dim = input_dim
+        self.attention_dim = attention_dim
+        
+        # 注意力权重计算
+        self.query = nn.Linear(input_dim, attention_dim)
+        self.key = nn.Linear(input_dim, attention_dim)
+        self.value = nn.Linear(input_dim, input_dim)
+        
+        # 缩放因子
+        self.scale = torch.sqrt(torch.FloatTensor([attention_dim]))
+    
+    def forward(self, x):
+        # x shape: [batch_size, seq_len, input_dim]
+        
+        Q = self.query(x)  # [batch_size, seq_len, attention_dim]
+        K = self.key(x)    # [batch_size, seq_len, attention_dim]
+        V = self.value(x)  # [batch_size, seq_len, input_dim]
+        
+        # 计算注意力分数
+        scores = torch.bmm(Q, K.transpose(1, 2))  # [batch_size, seq_len, seq_len]
+        scores = scores / self.scale.to(scores.device)
+        
+        # 应用softmax获取注意力权重
+        attention_weights = torch.softmax(scores, dim=-1)  # [batch_size, seq_len, seq_len]
+        
+        # 加权求和
+        attended_output = torch.bmm(attention_weights, V)  # [batch_size, seq_len, input_dim]
+        
+        # 只返回最后一个时间步的输出，保持与原始代码一致
+        return attended_output[:, -1, :]  # [batch_size, input_dim]
+
+# ---------------------------
 # Predictor: outputs marginals + selected important features
 # ---------------------------
 class Predictor(nn.Module):
@@ -45,15 +82,51 @@ class Predictor(nn.Module):
 
 
         #历史出牌时序特征, 接着 card_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
-        self.lstm = nn.LSTM(hidden_dim+4, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(hidden_dim+4, hidden_dim*2, batch_first=True)
+        
+        '''在LSTM层后添加三个独立的注意力层：
+        self.attention_play：用于处理出牌历史序列
+        self.attention_bid：用于处理叫主历史序列
+        self.attention_round：用于处理当前回合序列
+        
+        新增注意力机制模块：
+
+        添加了AttentionLayer类，实现了标准的缩放点积注意力机制
+        该模块包含查询（Query）、键（Key）和值（Value）的线性变换
+        使用softmax计算注意力权重，并对值进行加权求和
+
+        注意力机制可以帮助模型更好地关注历史序列中更重要的时间步，而不是仅仅依赖最后一个时间步的信息。这应该能提高模型对历史信息的理解能力，特别是对于 tractor（拖拉机）这种需要长期记忆和推理的游戏。
+
+        每个注意力层都会：
+
+        对LSTM输出的序列应用线性变换得到Q、K、V矩阵
+        计算注意力分数并应用softmax归一化
+        使用注意力权重对值进行加权求和
+        返回序列的整体表示，而非单一时间步的表示
+        
+        这样修改后，模型可以更好地捕捉历史出牌、叫 chủ和回合信息中的重要模式，有助于提高对手牌分布预测的准确性。
+
+        '''
+        self.attention_play = AttentionLayer(hidden_dim*2, hidden_dim)
+        self.attention_bid = AttentionLayer(hidden_dim*2, hidden_dim)
+        self.attention_round = AttentionLayer(hidden_dim*2, hidden_dim)
 
 
         # Assuming card_count = 2*4*15 = 112
         self.card_shape = (2, 4, 15)
         card_count = 2*4*15
-        # 2924是所有特征提取之后展开的长度
-        self.opp_heads = nn.ModuleList([nn.Linear(1800, card_count) for _ in range(self.num_opps)])
-        self.bottom_head = nn.Linear(1800, card_count)
+        f_dim = 2568# f_dim是所有特征提取之后展开的长度
+        opp_head_layers = []
+        for _ in range(self.num_opps):
+            layers = []
+            layers.append(nn.Linear(f_dim, f_dim//2))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(f_dim//2, f_dim//4))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(f_dim//4, card_count))
+            opp_head_layers.append(nn.Sequential(*layers))
+        self.opp_heads = nn.ModuleList(opp_head_layers)
+        self.bottom_head = nn.Linear(f_dim, card_count)
 
         # important features head (multi-label), e.g. 16 dims
         # self.important_head = nn.Linear(hidden_dim, k_important)
@@ -81,8 +154,19 @@ class Predictor(nn.Module):
         expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
         public_card_feat = public_card_feat * expanded_mask.float()# Zero out public_card_feat where mask is False
 
-        #多次动作组成的一轮数据，将多次打平成第三维
+        
+        #多次动作组成的一轮数据，将多次打平成第三维 
         b, a, c, d, e, f = play_card_history_feat.shape
+
+        #test code
+        for i in range(b):
+            for j in range(a):
+                test_cnt = play_card_history_feat[i,j,0].sum().item()
+                for k in range(4):
+                    if test_cnt != play_card_history_feat[i,j,k].sum().item():
+                        raise KeyError(play_card_history_feat[i,j])#bug
+                    test_cnt = play_card_history_feat[i,j,k].sum().item()
+
         play_card_history_feat = play_card_history_feat.reshape(b, a*c, d, e, f)
         b, a, c, d = play_seat_history_feat.shape
         play_seat_history_feat = play_seat_history_feat.reshape(b, a*c, d)
@@ -112,17 +196,20 @@ class Predictor(nn.Module):
         # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
         play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
         h_play, (_, _) = self.lstm(play_history_feat)
-        h_play = h_play[:,-1,:]#表示选择序列中的最后一个时间步，将整个序列信息压缩为最后一个时间步的表示，这个最终的隐藏状态包含了整个序列的历史信息，后续将其与其它特征拼接 (torch.cat([lstm_out,x], dim=-1)) 用于决策
+        # 使用注意力机制替代直接取最后一个时间步
+        h_play = self.attention_play(h_play) # [B, hidden_dim*2] -> [B, hidden_dim*2]
 
         bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
         bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
         h_bid, (_, _) = self.lstm(bid_history_feat)
-        h_bid = h_bid[:,-1,:]
+        # 使用注意力机制
+        h_bid = self.attention_bid(h_bid) # [B, hidden_dim*2]
 
         round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
         round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
         h_round, (_, _) = self.lstm(round_history_feat)
-        h_round = h_round[:,-1,:]
+        # 使用注意力机制
+        h_round = self.attention_round(h_round) # [B, hidden_dim*2]
 
 
         played_card_history_encodefeat = self.card_encoder(played_card_history_feat)

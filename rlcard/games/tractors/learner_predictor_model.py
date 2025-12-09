@@ -42,7 +42,7 @@ def learn(actor_model,
           lock):
         
     T = flags.unroll_length
-    loss_total = 0.0
+    loss_total, loss_opp_total,loss_bottom_total = 0.0, 0.0, 0.0
     with lock:
         for t in range(T):
             one_batch = {
@@ -55,19 +55,27 @@ def learn(actor_model,
             opp_probs, bottom_prob = learn_model.predictCard(one_batch)
             
             #每个玩家的手牌数, 归一化
-            hand_card_num = label_hand_card.view(label_hand_card.size(0),label_hand_card.size(1),-1).sum(-1)/25.0
+            hand_card_num = (25.0-label_hand_card.view(label_hand_card.size(0),label_hand_card.size(1),-1).sum(-1))/25.0
             
 
             loss_opp = F.binary_cross_entropy( opp_probs,  label_hand_card, reduction='none')
             # loss_opp = sum(F.binary_cross_entropy(prob, lbl) for prob,lbl in zip(opp_probs, label_hand_card))
             loss_bottom = F.binary_cross_entropy(bottom_prob, label_public_card, reduction='none')
 
-            hand_card_num = hand_card_num.view(hand_card_num.size(0), hand_card_num.size(1), 1, 1, 1)
-            hand_card_entropy = hand_card_num.expand_as(loss_opp)
-            loss_opp = loss_opp*hand_card_entropy
-            loss_bottom = loss_bottom*hand_card_entropy
-            
-            loss = loss_opp + loss_bottom
+            hand_card_entropy = hand_card_num.view(hand_card_num.size(0), hand_card_num.size(1), 1, 1, 1)
+            hand_card_entropy = hand_card_entropy.expand_as(loss_opp)
+            hand_card_entropy.requires_grad = False
+            loss_opp *= hand_card_entropy
+
+            confidence = hand_card_num.mean(1)
+            confidence = confidence.view(confidence.size(0), 1, 1, 1)
+            confidence = confidence.expand_as(loss_bottom)
+            confidence.requires_grad = False
+            loss_bottom = loss_bottom*confidence
+
+            loss_opp_total += loss_opp.mean()
+            loss_bottom_total += loss_bottom.mean()
+            loss = loss_opp.mean() + loss_bottom.mean()
             loss_total += loss.item()
             
             
@@ -82,6 +90,6 @@ def learn(actor_model,
             # 'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['predictor']])).item(),
             'loss': loss_total/T,
         }
-        print('loss_total', loss_total/T)
+        print(f'opp loss:{loss_opp_total/T:.4f},bottom loss:{loss_bottom_total/T:.4f},total loss:{loss_total/T:.4f},')
         
         return stats

@@ -48,18 +48,7 @@ if __name__ == '__main__':
         type=int,
         help='Time interval (in minutes) at which to save the model',
     )
-    parser.add_argument(
-        '--num_actor_devices',
-        default=1,
-        type=int,
-        help='The number of devices used for simulation',
-    )
-    parser.add_argument(
-        '--num_actors',
-        default=1,
-        type=int,
-        help='The number of actors for each simulation device',
-    )
+    
     parser.add_argument(
         '--training_device',
         default="0",
@@ -71,16 +60,7 @@ if __name__ == '__main__':
         default="0",
         type=str,
     )
-    parser.add_argument(
-        '--unroll_length',
-        default=16,
-        type=int,
-    )
-    parser.add_argument(
-        '--batch_size',#batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
-        default=32,
-        type=int,
-    )
+    
     parser.add_argument(
         '--num_buffers',
         default=50,
@@ -92,10 +72,44 @@ if __name__ == '__main__':
         type=float,
     )
     parser.add_argument(
-        '--num_threads',
+        '--num_actor_devices',
         default=1,
         type=int,
+        help='The number of devices used for simulation',
     )
+
+
+
+
+    parser.add_argument(
+        '--num_threads',
+        default=4,
+        type=int,
+    )    
+    parser.add_argument(
+        '--num_actors',
+        default=4,
+        type=int,
+        help='The number of actors for each simulation device',
+    )
+
+
+
+    parser.add_argument(
+        '--unroll_length',
+        default=16,
+        type=int,
+    )
+    parser.add_argument(
+        '--batch_size',#batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
+        default=32,
+        type=int,
+    )
+
+
+
+    
+
     parser.add_argument(
         '--total_frames',
         default=100000000000,

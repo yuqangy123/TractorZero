@@ -247,8 +247,16 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                 elif stage == "play":
                     play_pos = env.getPlayerPosition()
                     banker_pos = env.getBanker()
-                    # print(play_pos, banker_pos)
 
+                    #数据合法性验证
+                    for trj in range(len(history_play_card)):
+                        count = 0
+                        for seat in range(4):
+                            count += np.sum(history_play_card[trj][seat])
+                        if count%2 != 0:
+                            raise ValueError(history_play_card[trj][seat])
+                                
+                            
                     #存储当前进度的经验回放
                     history_play_card_buff.append(copy.deepcopy(history_play_card))
                     history_play_seat_buff.append(copy.deepcopy(history_play_seat))
@@ -263,9 +271,10 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     banker_seat_buff.append(get_one_hot_array(banker_pos+1, __PLAYER_COUNT__))
                     public_card_buff.append(history_public_card)
                     hand_cards_buff.append([cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)])
+                    
                     #存储训练用的经验回放
                     while len(history_play_card_buff) > T:
-                        index = free_queue.get()
+                        index = free_queue.get()#bug 这里容易卡死
                         if index is None:
                             break
                         for t in range(T):
@@ -284,7 +293,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
                             buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
                             
-                        # print('full_queue.put', index)
+                        
                         full_queue.put(index)
                         history_play_card_buff = history_play_card_buff[T:]
                         history_play_seat_buff = history_play_seat_buff[T:]
@@ -304,10 +313,18 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
                     playcard_mtrx = cards2matrix(response[1], inning_level, inning_major)
-                    if np.sum(playcard_mtrx) == 0:
-                        raise ValueError("出牌报错，该出牌为空")
+                    # if np.sum(playcard_mtrx)%2 != 0 and np.sum(playcard_mtrx) != 1:
+                    #     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
+                    #     raise ValueError("出牌报错，该出牌为空")
                     
-                    history_played_card += playcard_mtrx
+                    
+                    # print('playcard_mtrx.sum()', playcard_mtrx.sum(), history_curr)
+                    
+                    history_played_card = history_played_card + playcard_mtrx
+
+                    for seat in range(round_times):
+                        if round_play_card[seat].sum() != playcard_mtrx.sum():
+                            raise ValueError("出牌报错，该出牌与历史出牌不一致")
 
                     # 回合内信息
                     round_play_card[round_times] = playcard_mtrx
@@ -315,13 +332,12 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
 
                     #分牌
                     play_score_card = playcard_mtrx * history_remain_score_card
-                    history_score_card += play_score_card
-                    history_remain_score_card -= play_score_card
+                    history_score_card = history_score_card + play_score_card
+                    history_remain_score_card = history_remain_score_card - play_score_card
 
                     
-
-
                     round_times += 1
+                    
 
                 #一回合结束
                 elif stage == 'roundend' or stage == 'gameend':
@@ -338,6 +354,14 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     else:
                         history_play_card[round_cnt] = copy.deepcopy(round_play_card)
                         history_play_seat[round_cnt] = copy.deepcopy(round_play_seat)
+                    
+                    #数据合法性验证
+                    for trj in range(len(history_play_card)):
+                        count = 0
+                        for seat in range(4):
+                            count += np.sum(history_play_card[trj][seat])
+                        if count%2 != 0:
+                            raise ValueError(history_play_card[trj][seat])
                         
 
                     #重置回合信息
