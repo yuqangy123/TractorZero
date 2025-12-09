@@ -223,7 +223,8 @@ class Predictor(nn.Module):
         # h_play = h_play.reshape(batch_size, -1)
         # h_round = h_round.reshape(batch_size, -1)
         # h_bid = h_bid.reshape(batch_size, -1)
-        in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
+        in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, 
+                             score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
 
         opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
         bottom_logits = self.bottom_head(in_feat)  # [B, output_dim]
@@ -236,11 +237,13 @@ class Predictor(nn.Module):
         #mask可见牌
         mask_card = state_feat['history_played_card'].detach() + state_feat['history_bid_card'].sum(dim=1).detach() #[B, seat, 2, 4, 15]
         mask_card = mask_card.clamp(min=0.0, max=1.0)
+        mask_card = 1 - mask_card
+        
         # enumerate(state_feat['history_play_card'])
         # for bat, player_play_cards in enumerate(state_feat['history_play_card']):
         #     for seat_idx, play_card in enumerate(player_play_cards):
         #         mask_card[play_seat_history_feat[round_idx][seat_idx]] += play_card
-        mask_card = 1 - mask_card
+        
         
         # opp_probs = torch.from_numpy(np.array([opp_prob*mask_card for opp_prob in opp_probs])).to(self._device)
         # Transpose to get the desired shape [B, num_opps, 2, 4, 15]:
@@ -256,81 +259,3 @@ class Predictor(nn.Module):
         self.to(device)
         self.card_encoder.toDevice(device)
 
-
-# ---------------------------
-# Belief feature projector & confidence calculator
-# ---------------------------
-class BeliefProcessor(nn.Module):
-    """
-    将高维的 (opp_marginals, bottom_marginal, important_feats) 投影为紧凑向量 belief_repr
-    并计算置信度 c in [0,1]
-    """
-    def __init__(self, card_count, num_opps, k_important, repr_dim):
-        super().__init__()
-        self.card_count = card_count
-        self.num_opps = num_opps
-        self.k_important = k_important
-        self.repr_dim = repr_dim
-        # project concatenated marginals to compact vector
-        inp_dim = card_count * (num_opps + 1) + k_important
-        self.proj = nn.Sequential(
-            nn.Linear(inp_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, repr_dim)
-        )
-        # optional small network to predict a confidence scalar from features
-        self.conf_net = nn.Sequential(
-            nn.Linear(inp_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, opp_probs_list, bottom_prob, important_prob, time_step=None, max_steps=None):
-        """
-        opp_probs_list: list of [B, CARD_COUNT]
-        bottom_prob: [B, CARD_COUNT]
-        important_prob: [B, K]
-        time_step, max_steps: used for time-based confidence scaling (optional)
-        returns:
-           belief_repr: [B, repr_dim]
-           conf: [B] in [0,1]
-           entropy_vals: [B] raw entropy measure (for debug)
-        """
-        B = bottom_prob.shape[0]
-        # concat marginals: [B, CARD_COUNT*(num_opps+1)]
-        concat = torch.cat([p for p in opp_probs_list] + [bottom_prob], dim=-1)  # [B, C*(num_opps+1)]
-        inp = torch.cat([concat, important_prob], dim=-1)   # [B, inp_dim]
-        belief_repr = self.proj(inp)
-
-        # entropy-based confidence: average normalized entropy over opps+bottom
-        # compute entropy per distribution per batch
-        ent_list = []
-        for p in opp_probs_list:
-            ent = entropy_of_probs(p)    # [B]
-            ent_list.append(ent)
-        ent_b = entropy_of_probs(bottom_prob)  # [B]
-        ent_all = torch.stack(ent_list + [ent_b], dim=0)  # [num_opps+1, B]
-        ent_mean = torch.mean(ent_all, dim=0)  # [B]
-        # normalize entropy to [0,1] by dividing by max entropy log(C)
-        H_max = math.log(self.card_count + 1e-12)
-        entropy_norm = ent_mean / (H_max + 1e-12)   # lower is better (less uncertainty)
-        entropy_conf = 1.0 - entropy_norm           # map low ent -> high conf
-
-        # also allow learned conf_net (combines features) and blend learned + entropy
-        learned_conf = self.conf_net(inp).squeeze(-1)  # [B]
-        # combine: weighted average (could be hyperparam)
-        conf = 0.6 * entropy_conf + 0.4 * learned_conf
-
-        # time-based scaling: early steps -> downscale confidence
-        TIME_CONF_SCALE = 1.0
-        if time_step is not None and max_steps is not None:
-            # simple schedule: sigmoid centered at mid-game
-            t = float(time_step) / float(max_steps)
-            time_factor = float(1.0 / (1.0 + math.exp(-12*(t-0.5))))  # steep sigmoid from 0 ->1
-            conf = conf * (0.5 + TIME_CONF_SCALE * time_factor * 0.5)  # combine
-            # alternative: conf = conf * (t^alpha) etc.
-
-        # clamp
-        conf = torch.clamp(conf, 0.0, 1.0)
-        return belief_repr, conf, ent_mean

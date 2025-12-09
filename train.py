@@ -83,12 +83,12 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--num_threads',
-        default=4,
+        default=1,
         type=int,
     )    
     parser.add_argument(
         '--num_actors',
-        default=4,
+        default=1,
         type=int,
         help='The number of actors for each simulation device',
     )
