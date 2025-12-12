@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import threading, math
+
 CUDA_LAUNCH_BLOCKING=1
 TORCH_USE_CUDA_DSA=True
 def create_optimizer(
@@ -20,6 +22,8 @@ def get_batch(free_queue,
     on the indices received from the full queue. It will also
     free the indices by sending it to full_queue.
     """
+    tid = threading.get_ident()
+    print('get_batch_1', tid)
     with lock:
         indices = [full_queue.get() for _ in range(flags.batch_size)]
     batch = {
@@ -28,9 +32,9 @@ def get_batch(free_queue,
     }
     for m in indices:
         free_queue.put(m)
+    print('get_batch_2', tid)
     return batch
     #使用PPOClip的generate_batches
-
 
 def learn(actor_model,
           learn_model,
@@ -40,11 +44,119 @@ def learn(actor_model,
           flags,
           mean_episode_return_buf,
           lock):
+    tid = threading.get_ident()
         
     T = flags.unroll_length
     batch_size = flags.batch_size
-    loss_total, loss_opp_total, loss_bottom_total = torch.zeros(25).to(device), torch.zeros(25).to(device), torch.zeros(25).to(device)
+
+    #统计各类手牌数量时的loss
+    loss_total, loss_opp_total, loss_public_score_total = torch.zeros(25).to(device), torch.zeros(25).to(device), torch.zeros(25).to(device)
+
+    #统计对手牌模型的手牌预测准确率
+    accuracy_opp,accuracy_public_score = torch.zeros(25).to(device), torch.zeros(25).to(device)
+
+    #不同手牌数量的训练次数统计
     card_num_cnt = [0]*25
+    with lock:
+        for t in range(T):
+            one_batch = {
+                key: value[t] for key, value in batch.items()
+            }
+            label_hand_card = one_batch['hand_card'].to(device)
+            label_public_card = one_batch['public_card'].to(device)
+
+            
+            label_hand_card_color_num = label_hand_card.sum(dim=(2,4))#手牌花色数量分布
+            label_public_card_socre = ((one_batch['remain_score_card']+one_batch['score_card']).clamp(min=0.0, max=1.0)*label_public_card).sum(dim=(1,2,3))
+            opp_logits, public_card_logits = learn_model.predictCard(one_batch)#[32, 4, 4]， #[32]
+            
+            loss_opp = F.mse_loss(opp_logits, label_hand_card_color_num, reduction='none')#[32, 4, 4]
+            loss_public_score = F.mse_loss(public_card_logits, label_public_card_socre, reduction='none')#[32]
+
+            #当前4个玩家真实的手牌数, 归一化，用于乘以loss，做置信度
+            hand_card_num = label_hand_card.view(label_hand_card.size(0),label_hand_card.size(1),-1).sum(-1).long() #【32,4】
+            hand_card_num_norm = (25.0 - hand_card_num)/25.0#【32,4】
+
+            
+            loss_opp = loss_opp*hand_card_num_norm.unsqueeze(-1).expand(-1, -1, 4)#【32,4,4】
+            loss_public_score = loss_public_score*hand_card_num_norm[torch.arange(hand_card_num_norm.size(0)), one_batch['my_seat'].argmax(dim=1)]#[32]
+            
+                        
+            
+            for i in range(hand_card_num.shape[0]):
+                handcardNum = hand_card_num[i]-1
+                for j in range(handcardNum.shape[0]):                    
+                    #统计对手牌模型各类手牌数量时的loss
+                    #loss total [hand_card_num]=[loss]
+                    loss_opp_total[handcardNum[j]] += loss_opp[i][j].mean()
+                    accuracy_opp[handcardNum[j]] += torch.abs(label_hand_card_color_num[i][j]-opp_logits[i][j]).mean()
+
+                my_seat = one_batch['my_seat'][i].argmax()#我的座位号
+                my_hand_card_num = hand_card_num[i][my_seat]-1#我的手牌数
+                card_num_cnt[my_hand_card_num] += 1#只计算我的手牌数量统计
+                loss_public_score_total[my_hand_card_num] += loss_public_score[i]
+                accuracy_public_score[my_hand_card_num] += torch.abs(label_public_card_socre[i] - public_card_logits[i])
+                
+
+            #梯度更新
+            loss = loss_opp.mean() + loss_public_score.mean()
+            loss_total += loss.item()
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(learn_model.get_model('predictor').parameters(), flags.max_grad_norm)
+            optimizer.step()
+
+            actor_model.get_model('predictor').load_state_dict(learn_model.get_model('predictor').state_dict())
+
+        stats = {
+            # 'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['predictor']])).item(),
+            'loss': loss_total/T,
+        }
+        batch_size = 1#test code
+        loss_opp_total /= (T*batch_size)
+        loss_public_score_total /= (T*batch_size)
+        accuracy_opp /= (T*batch_size)
+        accuracy_public_score /= (T*batch_size)
+
+        print("loss_opp_total:")
+        print([ f'{loss.item()/4:.4f} ' for i, loss in enumerate(loss_opp_total)])
+        print('\n')
+        print("loss_public_score_total:")
+        print([ f'{loss.item()/card_num_cnt[i]:.4f} ' if card_num_cnt[i] > 0 else 0.0 for i, loss in enumerate(loss_public_score_total)])
+        print('\n')
+        print('accuracy_opp:')
+        print([f'{(acc/4).item():.4f}'  for i, acc in enumerate(accuracy_opp)])
+        print('\n')
+        print('accuracy_public_score:')
+        print([f'{(acc).item()/card_num_cnt[i]:.4f}' if card_num_cnt[i] > 0 else 0.0 for i, acc in enumerate(accuracy_public_score)])
+        print('\n')
+        
+        # print(f'opp loss:{loss_opp_total/T:.4f},bottom loss:{loss_bottom_total/T:.4f},total loss:{loss_total/T:.4f},')
+        
+        return stats
+
+
+def learn_card_distribute(actor_model,
+          learn_model,
+          batch,
+          optimizer,
+          device,
+          flags,
+          mean_episode_return_buf,
+          lock):
+    tid = threading.get_ident()
+        
+    T = flags.unroll_length
+    batch_size = flags.batch_size
+
+    #统计各类手牌数量时的loss
+    loss_total, loss_opp_total, loss_bottom_total = torch.zeros(25).to(device), torch.zeros(25).to(device), torch.zeros(25).to(device)
+
+    #统计对手牌模型的手牌预测准确率
+    accuracy,accuracy_zero,accuracy_one = torch.zeros(25).to(device), torch.zeros(25).to(device), torch.zeros(25).to(device)
+
+    #不同手牌数量的训练次数统计
+    card_num_cnt = torch.zeros(25).to(device)
     with lock:
         for t in range(T):
             one_batch = {
@@ -78,15 +190,40 @@ def learn(actor_model,
             loss_opp_mean = loss_opp.view(loss_opp.size(0),loss_opp.size(1),-1).sum(-1).mean(1)
             loss_bottom_mean = loss_bottom.view(loss_bottom.size(0),-1).mean(1)
             hand_card_num = hand_card_num.mean(1).long()
-            for i in range(hand_card_num.shape[0]):
-                loss_opp_total[hand_card_num[i]] += loss_opp_mean[i]
-                loss_bottom_total[hand_card_num[i]] += loss_bottom_mean[i]                
-                card_num_cnt[hand_card_num[i]] += 1
 
+            
+
+            
+            B = opp_probs  # rename for clarity
+            # 1. 展平最后三个维度：120 = 2*4*15
+            flat = B.view(B.size(0), B.size(1), -1)   # [32,4,120]
+            for i in range(hand_card_num.shape[0]):
+
+                #统计对手牌模型各类手牌数量时的loss
+                loss_opp_total[hand_card_num[i]-1] += loss_opp_mean[i]
+                loss_bottom_total[hand_card_num[i]-1] += loss_bottom_mean[i]                
+                card_num_cnt[hand_card_num[i]-1] += 1
+
+                #统计对手牌模型的手牌预测准确率
+                values, indices = torch.topk(flat[i], hand_card_num[i], dim=1)
+                mask_flat = torch.zeros_like(flat[i])
+                mask_flat.scatter_(1, indices, 1)# 把 top-k 的位置置为 1
+                opp_probs_mask = mask_flat.view_as(B[i])   # [4,2,4,15]
+                # 计算：在最后几个维度 (2,3,4) 上分别求和，结果形状 [32]
+                same = (label_hand_card[i] == opp_probs_mask).sum(dim=(1,2,3))        # [32]
+                both_zero = ((label_hand_card[i] == 0) & (opp_probs_mask == 0)).sum(dim=(1,2,3)) 
+                both_one  = ((label_hand_card[i] == 1) & (opp_probs_mask == 1)).sum(dim=(1,2,3))
+
+                accuracy[hand_card_num[i]-1] += same.sum()
+                accuracy_zero[hand_card_num[i]-1] += both_zero.sum()
+                accuracy_one[hand_card_num[i]-1] += both_one.sum()
+                
+
+
+
+            #梯度更新
             loss = loss_opp.mean() + loss_bottom.mean()
             loss_total += loss.item()
-            
-            
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(learn_model.get_model('predictor').parameters(), flags.max_grad_norm)
@@ -98,6 +235,18 @@ def learn(actor_model,
             # 'mean_episode_return': torch.mean(torch.stack([_r for _r in mean_episode_return_buf['predictor']])).item(),
             'loss': loss_total/T,
         }
-        print(f'opp loss:{loss_opp_total/T:.4f},bottom loss:{loss_bottom_total/T:.4f},total loss:{loss_total/T:.4f},')
+        print("loss_opp_total:")
+        print([ f'{(loss/card_num_cnt[i]).item():.4f} ' if card_num_cnt[i] > 0 else 0.0 for i, loss in enumerate(loss_opp_total)])
+        print('\n')
+        print('opp model accuracy:')
+        print([f'{(acc/card_num_cnt[i]/4/(120)).item():.4f}' if card_num_cnt[i] > 0 else 0.0 for i, acc in enumerate(accuracy)])
+        print('\n')
+        print('opp model accuracy_zero:')
+        print([f'{(acc_zero/card_num_cnt[i]/4/(120-i+1)).item():.4f}' if card_num_cnt[i] > 0 else 0.0 for i, acc_zero in enumerate(accuracy_zero)])
+        print('\n')
+        print('opp model accuracy_one:')
+        print([f'{(acc_one/card_num_cnt[i]/4/(i+1)).item():.4f}' if card_num_cnt[i] > 0 else 0.0 for i, acc_one in enumerate(accuracy_one)])
+        print('\n---------------------------------------------------------------------------------------------\n')
+        # print(f'opp loss:{loss_opp_total/T:.4f},bottom loss:{loss_bottom_total/T:.4f},total loss:{loss_total/T:.4f},')
         
         return stats

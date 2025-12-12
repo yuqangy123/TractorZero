@@ -303,7 +303,9 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         round_play_card_buff = round_play_card_buff[T:]
                         round_play_seat_buff = round_play_seat_buff[T:]
                         score_card_buff = score_card_buff[T:]
+                        remain_score_card_buff = remain_score_card_buff[T:]
                         my_seat_buff = my_seat_buff[T:]
+                        banker_seat_buff = banker_seat_buff[T:]
                         public_card_buff = public_card_buff[T:]
                         hand_cards_buff = hand_cards_buff[T:]
                     
@@ -335,7 +337,21 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     history_score_card = history_score_card + play_score_card
                     history_remain_score_card = history_remain_score_card - play_score_card
 
+                    #test code 错误检验
+                    all_cards = history_score_card + history_remain_score_card
+                    card_num = np.sum(all_cards)
+                    if card_num != 24:
+                        raise ValueError('分数牌不一致')
                     
+
+                    for k in range(len(score_card_buff)):
+                        score_cards = score_card_buff[k]
+                        remain_score_cards = remain_score_card_buff[k]
+                        all_cards = score_cards + remain_score_cards
+                        card_num = np.sum(all_cards)
+                        if card_num != 24:
+                            raise ValueError('分数牌不一致')
+                        
                     round_times += 1
                     
 
@@ -355,13 +371,14 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         history_play_card[round_cnt] = copy.deepcopy(round_play_card)
                         history_play_seat[round_cnt] = copy.deepcopy(round_play_seat)
                     
-                    #数据合法性验证
+                    #数据合法性验证 test code
                     for trj in range(len(history_play_card)):
                         count = 0
                         for seat in range(4):
                             count += np.sum(history_play_card[trj][seat])
                         if count%2 != 0:
                             raise ValueError(history_play_card[trj][seat])
+                    
                         
 
                     #重置回合信息

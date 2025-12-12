@@ -196,6 +196,8 @@ def train(flags):
     def batch_and_learn_predictor_model(i, device, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
         nonlocal frames, model_frames, stats
+        tid = threading.get_ident()
+        print('batch_and_learn_predictor_model', tid)
         while frames['predictor'] < flags.total_frames:
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
             _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
@@ -253,7 +255,7 @@ def train(flags):
             start_frames = frames['predictor']
             position_start_frames = {k: model_frames[k] for k in model_frames}
             start_time = timer()
-            time.sleep(5)
+            time.sleep(60)
 
             if timer() - last_checkpoint_time > flags.save_interval * 60:  
                 checkpoint(frames)

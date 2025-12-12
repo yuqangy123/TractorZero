@@ -61,11 +61,7 @@ if __name__ == '__main__':
         type=str,
     )
     
-    parser.add_argument(
-        '--num_buffers',
-        default=50,
-        type=int,
-    )
+    
     parser.add_argument(
         '--lr',
         default=0.005,
@@ -85,6 +81,7 @@ if __name__ == '__main__':
         '--num_threads',
         default=1,
         type=int,
+        help='learn线程',
     )    
     parser.add_argument(
         '--num_actors',
@@ -97,7 +94,12 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--unroll_length',
-        default=16,
+        default=50,
+        type=int,
+    )
+    parser.add_argument(
+        '--num_buffers',
+        default=32*4,
         type=int,
     )
     parser.add_argument(
