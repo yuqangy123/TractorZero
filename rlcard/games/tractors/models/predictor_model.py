@@ -185,8 +185,9 @@ class Predictor(nn.Module):
         b, a, c = play_seat_round_feat.shape
         play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
 
-
-        play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)
+        
+        play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)#一个card_encoder花费40ms
+        
         '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
         再将原来4个人的座位号展平，再将两个特征拼接在一起，
         也可以使用交替凭借，
@@ -239,11 +240,12 @@ class Predictor(nn.Module):
         in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, 
                              score_card_encodefeat, score_remain_card_encodefeat, mask_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
         
+        #这两个加起来也就12ms左右
         opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
         opp_logits.transpose_(1,0)
         bottom_logits = self.bottom_head(in_feat)
         bottom_logits.squeeze_(1)
-
+        
         return opp_logits, bottom_logits
 
 

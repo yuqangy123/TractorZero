@@ -84,8 +84,7 @@ def learn(actor_model,
             opp_logits, public_card_logits = learn_model.predictCard(one_batch)#[batch_size, 4, 4]， #[batch_size]
             end_event.record()
             torch.cuda.synchronize()
-            elapsed_ms = start_event.elapsed_time(end_event)
-            print("Forward time (ms):", elapsed_ms)
+            print("Forward time (ms):", start_event.elapsed_time(end_event))
 
             loss_opp = F.mse_loss(opp_logits, label_hand_card_color_num, reduction='none')#[batch_size, 4, 4]
             loss_public_score_cards = F.mse_loss(public_card_logits, label_public_card_socre, reduction='none')#[batch_size]

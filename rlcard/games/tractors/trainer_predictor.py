@@ -177,10 +177,10 @@ def train(flags):
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
                 actors[device].load_state_dict(k, checkpoint_states["model_state_dict"][k])
-            stats[k] = checkpoint_states["stats"]
-            frames[k] = checkpoint_states["frames"]
-            model_frames = checkpoint_states["model_frames"]
-            learn_epic_count = checkpoint_states["learn_epic_count"]
+            stats[k] = checkpoint_states["stats"][k]
+            frames[k] = checkpoint_states["frames"][k]
+            model_frames[k] = checkpoint_states["model_frames"][k]
+            learn_epic_count[k] = checkpoint_states["learn_epic_count"][k]
             log.info(f"Resuming preempted {k} model job, current stats:\n{stats}")
     
     for device in device_iterator:
