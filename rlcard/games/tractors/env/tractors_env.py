@@ -73,7 +73,9 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
         bid_card_buff = []
         bid_seat_buff = []
         
-
+        '''逐步迭代:
+        1.从残局预测开始训练（可见信息最丰富），然后逐步加入更多的不可见信息。'''
+        threshold_handcards = 5
         
         '''最终的回放buff，形状[T,15,4,2,4,15]，
         每个buff元素是一个形状为[15,4,2,4,15]的矩阵，15是轮数(history_play_card)，后面是一轮的出牌'''
@@ -147,12 +149,10 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
 
 
             # round_player_remain_card_num = [0,0,0,0]
-
-            
-
-
+            record_traj = False#是否开始记录轨迹
             inning_major = None
             inning_level = None
+
             
             while True:
                 env.step(response)
@@ -256,58 +256,58 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         if count%2 != 0:
                             raise ValueError(history_play_card[trj][seat])
                                 
-                            
-                    #存储当前进度的经验回放
-                    history_play_card_buff.append(copy.deepcopy(history_play_card))
-                    history_play_seat_buff.append(copy.deepcopy(history_play_seat))
-                    history_played_card_buff.append(copy.deepcopy(history_played_card))
-                    history_bid_card_buff.append(copy.deepcopy(history_bid_card))
-                    history_bid_seat_buff.append(copy.deepcopy(history_bid_seat))
-                    round_play_card_buff.append(copy.deepcopy(round_play_card))
-                    round_play_seat_buff.append(copy.deepcopy(round_play_seat))
-                    score_card_buff.append(copy.deepcopy(history_score_card))
-                    remain_score_card_buff.append(copy.deepcopy(history_remain_score_card))
-                    my_seat_buff.append(get_one_hot_array(play_pos+1, __PLAYER_COUNT__))
-                    banker_seat_buff.append(get_one_hot_array(banker_pos+1, __PLAYER_COUNT__))
-                    public_card_buff.append(history_public_card)
-                    hand_cards_buff.append([cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)])
-                    
-                    #存储训练用的经验回放
-                    while len(history_play_card_buff) > T:
-                        index = free_queue.get()#bug 这里容易卡死
-                        if index is None:
-                            break
-                        for t in range(T):
-                            # buffers是tensor history_play_card_buff是array
-                            buffers['history_play_card'][index][t, ...] = torch.tensor(history_play_card_buff[t])
-                            buffers['history_play_seat'][index][t, ...] = torch.tensor(history_play_seat_buff[t])
-                            buffers['history_played_card'][index][t, ...] = torch.tensor(history_played_card_buff[t])
-                            buffers['history_bid_card'][index][t, ...] = torch.tensor(history_bid_card_buff[t])
-                            buffers['history_bid_seat'][index][t, ...] = torch.tensor(history_bid_seat_buff[t])
-                            buffers['round_play_card'][index][t, ...] = torch.tensor(round_play_card_buff[t])
-                            buffers['round_play_seat'][index][t, ...] = torch.tensor(round_play_seat_buff[t])
-                            buffers['score_card'][index][t, ...] = torch.tensor(score_card_buff[t])
-                            buffers['remain_score_card'][index][t, ...] = torch.tensor(remain_score_card_buff[t])
-                            buffers['my_seat'][index][t, ...] = torch.tensor(my_seat_buff[t])
-                            buffers['banker_seat'][index][t, ...] = torch.tensor(banker_seat_buff[t])
-                            buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
-                            buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
-                            
+                    if record_traj: 
+                        #存储当前进度的经验回放
+                        history_play_card_buff.append(copy.deepcopy(history_play_card))
+                        history_play_seat_buff.append(copy.deepcopy(history_play_seat))
+                        history_played_card_buff.append(copy.deepcopy(history_played_card))
+                        history_bid_card_buff.append(copy.deepcopy(history_bid_card))
+                        history_bid_seat_buff.append(copy.deepcopy(history_bid_seat))
+                        round_play_card_buff.append(copy.deepcopy(round_play_card))
+                        round_play_seat_buff.append(copy.deepcopy(round_play_seat))
+                        score_card_buff.append(copy.deepcopy(history_score_card))
+                        remain_score_card_buff.append(copy.deepcopy(history_remain_score_card))
+                        my_seat_buff.append(get_one_hot_array(play_pos+1, __PLAYER_COUNT__))
+                        banker_seat_buff.append(get_one_hot_array(banker_pos+1, __PLAYER_COUNT__))
+                        public_card_buff.append(history_public_card)
+                        hand_cards_buff.append([cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)])
                         
-                        full_queue.put(index)
-                        history_play_card_buff = history_play_card_buff[T:]
-                        history_play_seat_buff = history_play_seat_buff[T:]
-                        history_played_card_buff = history_played_card_buff[T:]
-                        history_bid_card_buff = history_bid_card_buff[T:]
-                        history_bid_seat_buff = history_bid_seat_buff[T:]
-                        round_play_card_buff = round_play_card_buff[T:]
-                        round_play_seat_buff = round_play_seat_buff[T:]
-                        score_card_buff = score_card_buff[T:]
-                        remain_score_card_buff = remain_score_card_buff[T:]
-                        my_seat_buff = my_seat_buff[T:]
-                        banker_seat_buff = banker_seat_buff[T:]
-                        public_card_buff = public_card_buff[T:]
-                        hand_cards_buff = hand_cards_buff[T:]
+                        #存储训练用的经验回放
+                        while len(history_play_card_buff) > T:
+                            index = free_queue.get()#bug 这里容易卡死 batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
+                            if index is None:
+                                break
+                            for t in range(T):
+                                # buffers是tensor history_play_card_buff是array
+                                buffers['history_play_card'][index][t, ...] = torch.tensor(history_play_card_buff[t])
+                                buffers['history_play_seat'][index][t, ...] = torch.tensor(history_play_seat_buff[t])
+                                buffers['history_played_card'][index][t, ...] = torch.tensor(history_played_card_buff[t])
+                                buffers['history_bid_card'][index][t, ...] = torch.tensor(history_bid_card_buff[t])
+                                buffers['history_bid_seat'][index][t, ...] = torch.tensor(history_bid_seat_buff[t])
+                                buffers['round_play_card'][index][t, ...] = torch.tensor(round_play_card_buff[t])
+                                buffers['round_play_seat'][index][t, ...] = torch.tensor(round_play_seat_buff[t])
+                                buffers['score_card'][index][t, ...] = torch.tensor(score_card_buff[t])
+                                buffers['remain_score_card'][index][t, ...] = torch.tensor(remain_score_card_buff[t])
+                                buffers['my_seat'][index][t, ...] = torch.tensor(my_seat_buff[t])
+                                buffers['banker_seat'][index][t, ...] = torch.tensor(banker_seat_buff[t])
+                                buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
+                                buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
+                                
+                            
+                            full_queue.put(index)
+                            history_play_card_buff = history_play_card_buff[T:]
+                            history_play_seat_buff = history_play_seat_buff[T:]
+                            history_played_card_buff = history_played_card_buff[T:]
+                            history_bid_card_buff = history_bid_card_buff[T:]
+                            history_bid_seat_buff = history_bid_seat_buff[T:]
+                            round_play_card_buff = round_play_card_buff[T:]
+                            round_play_seat_buff = round_play_seat_buff[T:]
+                            score_card_buff = score_card_buff[T:]
+                            remain_score_card_buff = remain_score_card_buff[T:]
+                            my_seat_buff = my_seat_buff[T:]
+                            banker_seat_buff = banker_seat_buff[T:]
+                            public_card_buff = public_card_buff[T:]
+                            hand_cards_buff = hand_cards_buff[T:]
                     
                     #执行游戏出牌
                     history_curr = env.getCurrRoundPlayHistory()
@@ -321,37 +321,36 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     
                     
                     # print('playcard_mtrx.sum()', playcard_mtrx.sum(), history_curr)
-                    
-                    history_played_card = history_played_card + playcard_mtrx
+                    if record_traj: 
+                        history_played_card = history_played_card + playcard_mtrx
+                        for seat in range(round_times):
+                            if round_play_card[seat].sum() != playcard_mtrx.sum():
+                                raise ValueError("出牌报错，该出牌与历史出牌不一致")
 
-                    for seat in range(round_times):
-                        if round_play_card[seat].sum() != playcard_mtrx.sum():
-                            raise ValueError("出牌报错，该出牌与历史出牌不一致")
+                        # 回合内信息
+                        round_play_card[round_times] = playcard_mtrx
+                        round_play_seat[round_times][play_pos-1] = 1.0
 
-                    # 回合内信息
-                    round_play_card[round_times] = playcard_mtrx
-                    round_play_seat[round_times][play_pos-1] = 1.0
+                        #分牌
+                        play_score_card = playcard_mtrx * history_remain_score_card
+                        history_score_card = history_score_card + play_score_card
+                        history_remain_score_card = history_remain_score_card - play_score_card
 
-                    #分牌
-                    play_score_card = playcard_mtrx * history_remain_score_card
-                    history_score_card = history_score_card + play_score_card
-                    history_remain_score_card = history_remain_score_card - play_score_card
-
-                    #test code 错误检验
-                    all_cards = history_score_card + history_remain_score_card
-                    card_num = np.sum(all_cards)
-                    if card_num != 24:
-                        raise ValueError('分数牌不一致')
-                    
-
-                    for k in range(len(score_card_buff)):
-                        score_cards = score_card_buff[k]
-                        remain_score_cards = remain_score_card_buff[k]
-                        all_cards = score_cards + remain_score_cards
+                        # #test code 错误检验
+                        all_cards = history_score_card + history_remain_score_card
                         card_num = np.sum(all_cards)
                         if card_num != 24:
                             raise ValueError('分数牌不一致')
                         
+
+                        for k in range(len(score_card_buff)):
+                            score_cards = score_card_buff[k]
+                            remain_score_cards = remain_score_card_buff[k]
+                            all_cards = score_cards + remain_score_cards
+                            card_num = np.sum(all_cards)
+                            if card_num != 24:
+                                raise ValueError('分数牌不一致')
+                            
                     round_times += 1
                     
 
@@ -390,6 +389,9 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         
                     response = None
                     
+                    if len(env.getPlayerHoldCards(env.getPlayerPosition())) <= threshold_handcards:
+                        record_traj = True
+
                     #结束
                     if stage == 'gameend':
                         # cover_reward_buff.append(reward)

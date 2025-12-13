@@ -79,26 +79,26 @@ def create_buffers(flags, device_iterator):
 
     return belief_buffer
 
-def get_batch(free_queue,
-              full_queue,
-              buffers,
-              flags,
-              lock):
-    """
-    This function will sample a batch from the buffers based
-    on the indices received from the full queue. It will also
-    free the indices by sending it to full_queue.
-    """
-    with lock:
-        indices = [full_queue.get() for _ in range(flags.batch_size)]
-    batch = {
-        key: torch.stack([buffers[key][m] for m in indices], dim=1)
-        for key in buffers
-    }
-    for m in indices:
-        free_queue.put(m)
-    return batch
-    #使用PPOClip的generate_batches
+# def get_batch(free_queue,
+#               full_queue,
+#               buffers,
+#               flags,
+#               lock):
+#     """
+#     This function will sample a batch from the buffers based
+#     on the indices received from the full queue. It will also
+#     free the indices by sending it to full_queue.
+#     """
+#     with lock:
+#         indices = [full_queue.get() for _ in range(flags.batch_size)]
+#     batch = {
+#         key: torch.stack([buffers[key][m] for m in indices], dim=1)
+#         for key in buffers
+#     }
+#     for m in indices:
+#         free_queue.put(m)
+#     return batch
+#     #使用PPOClip的generate_batches
 
 
     
@@ -147,6 +147,7 @@ def train(flags):
     for device in device_iterator:
         free_queue[device] = ctx.SimpleQueue()
         full_queue[device] = ctx.SimpleQueue()
+        
 
     # Learner model for training
     learner_actor = {'predictor':tractorActor(device=device, args=flags)}
@@ -193,6 +194,10 @@ def train(flags):
             actor_pro.start()
             actor_processes.append(actor_pro)
 
+    from ctypes import c_int, c_float, c_double, c_bool
+    learn_count = ctx.Value(c_int, 0)
+    
+    
     def batch_and_learn_predictor_model(i, device, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
         nonlocal frames, model_frames, stats
@@ -200,8 +205,8 @@ def train(flags):
         print('batch_and_learn_predictor_model', tid)
         while frames['predictor'] < flags.total_frames:
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
-            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock)
-     
+            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock, learn_count)
+
             with lock:
                 for k in _stats:
                     stats['predictor'][k] = _stats[k]
@@ -268,14 +273,14 @@ def train(flags):
                 fps_log = fps_log[1:]
             fps_avg = np.mean(fps_log)
 
-            position_fps = {k:(model_frames[k]-position_start_frames[k])/(end_time-start_time) for k in model_frames}
-            log.info('After %i (predictor:%i) frames: @ %.1f fps (avg@ %.1f fps) (predictor:%.1f) Stats:%s\n',
-                     frames['predictor'],
-                     model_frames['predictor'],
-                     fps,
-                     fps_avg,
-                     position_fps['predictor'],
-                     pprint.pformat(stats))
+            #position_fps = {k:(model_frames[k]-position_start_frames[k])/(end_time-start_time) for k in model_frames}
+            # log.info('After %i (predictor:%i) frames: @ %.1f fps (avg@ %.1f fps) (predictor:%.1f) Stats:%s\n',
+            #          frames['predictor'],
+            #          model_frames['predictor'],
+            #          fps,
+            #          fps_avg,
+            #          position_fps['predictor'],
+            #          pprint.pformat(stats))
 
     except KeyboardInterrupt:
         return 
