@@ -14,7 +14,7 @@ from rlcard.utils.file_writer import FileWriter
 
 from rlcard.games.tractors.models import tractorActor
 from .env.tractors_env import run
-
+from ctypes import c_int, c_float, c_double, c_bool
 from rlcard.games.tractors import learner_predictor_model
 
 
@@ -164,6 +164,8 @@ def train(flags):
     stats = {'predictor':{k: 0 for k in stat_keys}}
     model_frames = {'predictor':0}
     frames = {'predictor':0}
+    learn_epic_count = {'predictor':0}
+    
 
     # Load models if any
     if flags.load_model and os.path.exists(checkpointpath):
@@ -171,13 +173,14 @@ def train(flags):
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
         for k in ['predictor']:
-            assert learner_actor[k].get_model('predictor').load_state_dict(k, checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
+            assert learner_actor[k].get_model('predictor').load_state_dict(checkpoint_states["model_state_dict"][k]), f'model {k} load checkpoint failed'
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
                 actors[device].load_state_dict(k, checkpoint_states["model_state_dict"][k])
-            stats[k] = checkpoint_states["stats"][k]
-            frames[k] = checkpoint_states["frames"][k]
-            model_frames = checkpoint_states["model_frames"][k]
+            stats[k] = checkpoint_states["stats"]
+            frames[k] = checkpoint_states["frames"]
+            model_frames = checkpoint_states["model_frames"]
+            learn_epic_count = checkpoint_states["learn_epic_count"]
             log.info(f"Resuming preempted {k} model job, current stats:\n{stats}")
     
     for device in device_iterator:
@@ -194,18 +197,15 @@ def train(flags):
             actor_pro.start()
             actor_processes.append(actor_pro)
 
-    from ctypes import c_int, c_float, c_double, c_bool
-    learn_count = ctx.Value(c_int, 0)
-    
-    
     def batch_and_learn_predictor_model(i, device, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
         nonlocal frames, model_frames, stats
         tid = threading.get_ident()
         print('batch_and_learn_predictor_model', tid)
         while frames['predictor'] < flags.total_frames:
+            #单线程运行，否则learn_epic_count['predictor']会读错数据
             batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
-            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock, learn_count)
+            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock, learn_epic_count['predictor'])
 
             with lock:
                 for k in _stats:
@@ -215,6 +215,7 @@ def train(flags):
                 plogger.log(to_log)
                 frames['predictor'] += T * B
                 model_frames['predictor'] += T * B
+                learn_epic_count['predictor'] += 1
     
 
     threads = []
@@ -233,17 +234,19 @@ def train(flags):
 
             
     
-    def checkpoint(frames):
+    def checkpoint():
         if flags.disable_checkpoint:
             return
+        
         log.info('Saving checkpoint to %s', checkpointpath)
         torch.save({
             'model_state_dict': {k: learner_actor[k].get_model('predictor').state_dict() for k in learner_actor},
             'optimizer_state_dict': {k: optimizers[k].state_dict() for k in optimizers},
             "stats": stats,
             'flags': vars(flags),
-            'frames': frames['predictor'],
-            'model_frames': model_frames['predictor']
+            'frames': frames,
+            'model_frames': model_frames,
+            'learn_epic_count': learn_epic_count
         }, checkpointpath)
 
         # Save the weights for evaluation purpose
@@ -263,7 +266,7 @@ def train(flags):
             time.sleep(60)
 
             if timer() - last_checkpoint_time > flags.save_interval * 60:  
-                checkpoint(frames)
+                checkpoint()
                 last_checkpoint_time = timer()
             end_time = timer()
 
@@ -289,5 +292,5 @@ def train(flags):
             thread.join()
         log.info('Learning finished after %d frames.', frames)
 
-    checkpoint(frames)
+    checkpoint()
     plogger.close()

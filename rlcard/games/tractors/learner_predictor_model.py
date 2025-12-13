@@ -16,7 +16,7 @@ def create_optimizer(
     lr,
     learner_model
 ):
-    optimizer = torch.optim.Adam(learner_model.parameters(), lr)
+    optimizer = torch.optim.AdamW(learner_model.parameters(), lr)
     return optimizer
 
 def get_batch(free_queue,
@@ -67,7 +67,7 @@ def learn(actor_model,
     card_num_cnt, opp_card_num_cnt = [0]*25, [0]*25
     with lock:
         for t in range(T):
-            one_batch = {
+            one_batch = {#[T, batch_size, ...]
                 key: value[t] for key, value in batch.items()
             }
             label_hand_card = one_batch['hand_card'].to(device)
@@ -76,8 +76,17 @@ def learn(actor_model,
             
             label_hand_card_color_num = label_hand_card.sum(dim=(2,4))#手牌花色数量分布
             label_public_card_socre = ((one_batch['remain_score_card']+one_batch['score_card']).clamp(min=0.0, max=1.0)*label_public_card).sum(dim=(1,2,3))
+
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            start_event.record()
             opp_logits, public_card_logits = learn_model.predictCard(one_batch)#[batch_size, 4, 4]， #[batch_size]
-            
+            end_event.record()
+            torch.cuda.synchronize()
+            elapsed_ms = start_event.elapsed_time(end_event)
+            print("Forward time (ms):", elapsed_ms)
+
             loss_opp = F.mse_loss(opp_logits, label_hand_card_color_num, reduction='none')#[batch_size, 4, 4]
             loss_public_score_cards = F.mse_loss(public_card_logits, label_public_card_socre, reduction='none')#[batch_size]
 
@@ -143,12 +152,10 @@ def learn(actor_model,
         print([f'{(acc).item()/card_num_cnt[i]:.4f}' if card_num_cnt[i] > 0 else 'none' for i, acc in enumerate(variance_public_score_cards)])
         print('\n-----------------------------------------------------------------------------------------------------------------------')
         
-        _learn_count = learn_count.value
-        with learn_count.get_lock(): learn_count.value += 1
-        _writer_loss_opp.add_scalars('loss_opp', {f'loss_opp_{i}': v.item()/opp_card_num_cnt[i] if opp_card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(loss_opp_total)}, _learn_count)
-        _writer_loss_public_score_cards.add_scalars('loss_public_score_cards', {f'loss_public_score_cards_{i}': v.item()/card_num_cnt[i] if card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(loss_public_score_cards_total)}, _learn_count)
-        _writer_variance_opp.add_scalars('variance_opp', {f'variance_opp_{i}': v.item()/opp_card_num_cnt[i] if opp_card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(variance_opp)}, _learn_count)
-        _writer_variance_public_score_cards.add_scalars('variance_public_score_cards', {f'variance_public_score_cards_{i}': v.item()/card_num_cnt[i] if card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(variance_public_score_cards)}, _learn_count)
+        _writer_loss_opp.add_scalars('loss_opp', {f'loss_opp_{i}': v.item()/opp_card_num_cnt[i] if opp_card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(loss_opp_total)}, learn_count)
+        _writer_loss_public_score_cards.add_scalars('loss_public_score_cards', {f'loss_public_score_cards_{i}': v.item()/card_num_cnt[i] if card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(loss_public_score_cards_total)}, learn_count)
+        _writer_variance_opp.add_scalars('variance_opp', {f'variance_opp_{i}': v.item()/opp_card_num_cnt[i] if opp_card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(variance_opp)}, learn_count)
+        _writer_variance_public_score_cards.add_scalars('variance_public_score_cards', {f'variance_public_score_cards_{i}': v.item()/card_num_cnt[i] if card_num_cnt[i] > 0 else 0.0 for i, v in enumerate(variance_public_score_cards)}, learn_count)
         
        
        

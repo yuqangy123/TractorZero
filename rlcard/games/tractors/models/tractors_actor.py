@@ -25,6 +25,8 @@ class TractorsActor():
         # self, hidden_dim, num_opps
         _predictmodel = PredictModel()
         _predictmodel.toDevice(device != 'cpu' and t.device('cuda:'+str(device)) or device)
+        total_predictmodel_params = sum(p.numel() for p in _predictmodel.parameters())
+        print("Total predictmodel parameters:", total_predictmodel_params)
         self.__models['predictor'] = _predictmodel
         pass
 
@@ -98,7 +100,7 @@ class TractorsActor():
         return opp_probs, bottom_prob
     def load_state_dict(self, model_name, dict):
         if model_name in self.__models:
-            self.__models[model_name].load_checkpoint(dict)
+            self.__models[model_name].load_state_dict(dict)
             return True
         return False
         

@@ -25,10 +25,11 @@ if __name__ == '__main__':
     parser.add_argument(
         '--cuda',
         type=str,
-        default='',
+        default='0',
     )
     parser.add_argument(
         '--load_model',
+        default=True,
         action='store_true',
         help='Load an existing model',
     )
@@ -85,7 +86,7 @@ if __name__ == '__main__':
     )    
     parser.add_argument(
         '--num_actors',
-        default=1,
+        default=2,
         type=int,
         help='The number of actors for each simulation device',
     )
@@ -94,12 +95,12 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--unroll_length',
-        default=50,
+        default=30,
         type=int,
     )
     parser.add_argument(
         '--num_buffers',
-        default=32*4,
+        default=128,
         type=int,
     )
     parser.add_argument(
@@ -127,6 +128,6 @@ if __name__ == '__main__':
     
 
     args = parser.parse_args()
-
+    
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
     train_predict.train(args)
