@@ -80,7 +80,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--num_threads',
-        default=1,
+        default=2,
         type=int,
         help='learn线程',
     )    
@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--unroll_length',
-        default=30,
+        default=60,
         type=int,
     )
     parser.add_argument(

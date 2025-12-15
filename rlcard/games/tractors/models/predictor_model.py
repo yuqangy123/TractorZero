@@ -78,8 +78,10 @@ class Predictor(nn.Module):
 
         # 手牌特征提取器 (2,4,15) -> (hidden_channels,2,4,5) 
         ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
-        self.card_encoder = ResNet(ResidualBlock, [2, 2, 2, 2, 2], hidden_channels=[14,28,56,28,14], in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
-
+        self.card_encoder = ResNet(ResidualBlock, layers = [2 ], hidden_channels=[14], in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
+        
+        total_predictmodel_params = sum(p.numel() for p in self.card_encoder.parameters())
+        print("card_encoder parameters:", total_predictmodel_params)
 
         #历史出牌时序特征, 接着 card_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
         self.lstm = nn.LSTM(hidden_dim+4, hidden_dim, batch_first=True)
@@ -184,10 +186,49 @@ class Predictor(nn.Module):
         play_card_round_feat = play_card_round_feat.reshape(b, a, c, d, e)
         b, a, c = play_seat_round_feat.shape
         play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
+        
+        #mask可见牌
+        mask_card = state_feat['history_played_card'].detach() + state_feat['history_bid_card'].sum(dim=1).detach() #[B, seat, 2, 4, 15]
+        mask_card = mask_card.clamp(min=0.0, max=1.0)
+        mask_card = 1 - mask_card
+        
+        # play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)#一个card_encoder花费40ms
+
+        card_feature_dict = {
+            'play_history': play_card_history_feat.reshape(-1, 2, 4, 15),
+            'bid_history': bid_card_history_feat.reshape(-1, 2, 4, 15),
+            'round_history': play_card_round_feat.reshape(-1, 2, 4, 15),
+            'played_history': played_card_history_feat,
+            'score_card': score_card_feat,
+            'score_remain': score_remain_card_feat,
+            'public_card': public_card_feat,
+            'mask_card': mask_card
+        }
 
         
-        play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)#一个card_encoder花费40ms
-        
+        # Concatenate all features along batch dimension
+        batched_features = torch.cat(list(card_feature_dict.values()), dim=0)
+
+        # Single encoder call
+        encoded_features = self.card_encoder(batched_features)
+
+        # Split and reshape back
+        split_sizes = [v.shape[0] for v in card_feature_dict.values()]
+        split_features = torch.split(encoded_features, split_sizes, dim=0)
+
+        # Reconstruct individual features
+        features_iter = iter(split_features)
+        play_card_history_enocdefeat = next(features_iter).reshape(
+            play_card_history_feat.shape[0], play_card_history_feat.shape[1], -1)
+        bid_card_history_encodefeat = next(features_iter).reshape(
+            bid_card_history_feat.shape[0], bid_card_history_feat.shape[1], -1)
+        round_card_history_encodefeat = next(features_iter).reshape(
+            play_card_round_feat.shape[0], play_card_round_feat.shape[1], -1)
+        played_card_history_encodefeat = next(features_iter)
+        score_card_encodefeat = next(features_iter)
+        score_remain_card_encodefeat = next(features_iter)
+        public_card_encodefeat = next(features_iter)
+        mask_card_encodefeat = next(features_iter)
         '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
         再将原来4个人的座位号展平，再将两个特征拼接在一起，
         也可以使用交替凭借，
@@ -205,31 +246,28 @@ class Predictor(nn.Module):
         # 使用注意力机制替代直接取最后一个时间步
         h_play = self.attention_play(h_play) # [B, hidden_dim*2] -> [B, hidden_dim*2]
 
-        bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
+        # bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
         bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
         h_bid, (_, _) = self.lstm(bid_history_feat)
         # 使用注意力机制
         h_bid = self.attention_bid(h_bid) # [B, hidden_dim*2]
 
-        round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
+        # round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
         round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
         h_round, (_, _) = self.lstm(round_history_feat)
         # 使用注意力机制
         h_round = self.attention_round(h_round) # [B, hidden_dim*2]
 
 
-        played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
-        score_card_encodefeat = self.card_encoder(score_card_feat)
-        score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
+        # played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
+        # score_card_encodefeat = self.card_encoder(score_card_feat)
+        # score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
 
-        public_card_encodefeat = self.card_encoder(public_card_feat)
+        # public_card_encodefeat = self.card_encoder(public_card_feat)
         
 
-        #mask可见牌
-        mask_card = state_feat['history_played_card'].detach() + state_feat['history_bid_card'].sum(dim=1).detach() #[B, seat, 2, 4, 15]
-        mask_card = mask_card.clamp(min=0.0, max=1.0)
-        mask_card = 1 - mask_card
-        mask_card_encodefeat = self.card_encoder(mask_card)
+        
+        # mask_card_encodefeat = self.card_encoder(mask_card)
 
         #特征融合
         batch_size = my_seat_feat.shape[0]
