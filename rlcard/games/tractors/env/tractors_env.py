@@ -315,41 +315,38 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
                     playcard_mtrx = cards2matrix(response[1], inning_level, inning_major)
+                    history_played_card = history_played_card + playcard_mtrx
                     # if np.sum(playcard_mtrx)%2 != 0 and np.sum(playcard_mtrx) != 1:
                     #     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     #     raise ValueError("出牌报错，该出牌为空")
                     
                     
                     # print('playcard_mtrx.sum()', playcard_mtrx.sum(), history_curr)
-                    if record_traj: 
-                        history_played_card = history_played_card + playcard_mtrx
-                        for seat in range(round_times):
-                            if round_play_card[seat].sum() != playcard_mtrx.sum():
-                                raise ValueError("出牌报错，该出牌与历史出牌不一致")
+                    for seat in range(round_times):
+                        if round_play_card[seat].sum() != playcard_mtrx.sum():
+                            raise ValueError("出牌报错，该出牌与历史出牌不一致")
 
-                        # 回合内信息
-                        round_play_card[round_times] = playcard_mtrx
-                        round_play_seat[round_times][play_pos-1] = 1.0
+                    # 回合内信息
+                    round_play_card[round_times] = playcard_mtrx
+                    round_play_seat[round_times][play_pos] = 1.0
 
-                        #分牌
-                        play_score_card = playcard_mtrx * history_remain_score_card
-                        history_score_card = history_score_card + play_score_card
-                        history_remain_score_card = history_remain_score_card - play_score_card
+                    #分牌
+                    play_score_card = playcard_mtrx * history_remain_score_card
+                    history_score_card = history_score_card + play_score_card
+                    history_remain_score_card = history_remain_score_card - play_score_card
 
-                        # #test code 错误检验
-                        all_cards = history_score_card + history_remain_score_card
-                        card_num = np.sum(all_cards)
-                        if card_num != 24:
-                            raise ValueError('分数牌不一致')
-                        
-
-                        for k in range(len(score_card_buff)):
-                            score_cards = score_card_buff[k]
-                            remain_score_cards = remain_score_card_buff[k]
-                            all_cards = score_cards + remain_score_cards
-                            card_num = np.sum(all_cards)
-                            if card_num != 24:
-                                raise ValueError('分数牌不一致')
+                    # # #test code 错误检验
+                    # all_cards = history_score_card + history_remain_score_card
+                    # card_num = np.sum(all_cards)
+                    # if card_num != 24:
+                    #     raise ValueError('分数牌不一致')
+                    # for k in range(len(score_card_buff)):
+                    #     score_cards = score_card_buff[k]
+                    #     remain_score_cards = remain_score_card_buff[k]
+                    #     all_cards = score_cards + remain_score_cards
+                    #     card_num = np.sum(all_cards)
+                    #     if card_num != 24:
+                    #         raise ValueError('分数牌不一致')
                             
                     round_times += 1
                     

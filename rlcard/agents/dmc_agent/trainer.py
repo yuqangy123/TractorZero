@@ -358,9 +358,10 @@ class DMCTrainer:
                 start_time = timer()
                 time.sleep(5)
 
-                if timer() - last_checkpoint_time > self.save_interval * 60:
-                    checkpoint(frames)
-                    last_checkpoint_time = timer()
+                #实验阶段暂时不保存
+                # if timer() - last_checkpoint_time > self.save_interval * 60:
+                #     checkpoint(frames)
+                #     last_checkpoint_time = timer()
 
                 end_time = timer()
                 fps = (frames - start_frames) / (end_time - start_time)

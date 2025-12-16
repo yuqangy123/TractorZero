@@ -91,7 +91,7 @@ def learn(actor_model,
             # end_event = torch.cuda.Event(enable_timing=True) 
             # start_event.record()
 
-            opp_logits, public_card_logits = learn_model.predictCard(one_batch)#[batch_size, 4, 4]， #[batch_size]
+            opp_logits, public_card_logits = learn_model.predictCard(one_batch, True)#[batch_size, 4, 4]， #[batch_size]
             
             # end_event.record()
             # torch.cuda.synchronize()

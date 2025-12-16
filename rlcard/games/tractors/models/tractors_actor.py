@@ -84,7 +84,7 @@ class TractorsActor():
         out_cards = matrix2card(out_cards)
         return out_cards
 
-    def predictCard(self, input_x):
+    def predictCard(self, input_x, isTrain=None):
         # history_play_card=input_x['history_play_card']
         # history_play_seat=input_x['history_play_seat']
         # history_played_card=input_x['history_played_card']
@@ -96,7 +96,7 @@ class TractorsActor():
         # remain_score_card=input_x['remain_score_card']
         # my_seat=input_x['my_seat']
         # mask_card_mat = history_played_card
-        opp_probs, bottom_prob = self.__models['predictor'](input_x)
+        opp_probs, bottom_prob = self.__models['predictor'](input_x, isTrain)
         return opp_probs, bottom_prob
     def load_state_dict(self, model_name, dict):
         if model_name in self.__models:
