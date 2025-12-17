@@ -57,6 +57,7 @@ def create_buffers(flags, device_iterator):
             history_bid_seat=dict(size=(T,2,4), dtype=torch.float32),
             round_play_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
             round_play_seat=dict(size=(T,4,4), dtype=torch.float32),
+            mask_card=dict(size=(T,4,2,4,15), dtype=torch.float32),
 
             score_card=dict(size=(T,2,4,15), dtype=torch.float32),
             remain_score_card=dict(size=(T,2,4,15), dtype=torch.float32),

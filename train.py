@@ -80,13 +80,13 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--num_threads',
-        default=2,
+        default=1,
         type=int,
         help='learn线程',
     )    
     parser.add_argument(
         '--num_actors',
-        default=2,
+        default=4,
         type=int,
         help='The number of actors for each simulation device',
     )
@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--unroll_length',
-        default=60,
+        default=160,
         type=int,
     )
     parser.add_argument(
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--batch_size',#batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
-        default=32,
+        default=2,
         type=int,
     )
 

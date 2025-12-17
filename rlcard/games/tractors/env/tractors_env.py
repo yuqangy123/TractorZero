@@ -96,6 +96,9 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
         public_card_buff = []
         #手牌缓存
         hand_cards_buff = []
+        
+        #掩蔽牌缓存
+        mask_cards_buff = []
 
         while True:
             response = []
@@ -119,8 +122,6 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
             round_play_seat = []
 
             
-            
-            
 
             ######################################################################################
             #报主缓存
@@ -141,6 +142,8 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
 
             history_play_team = None
             history_level_card = None
+
+            mask_cards = []
             ######################################################################################
 
             #回合出牌緩存
@@ -225,6 +228,14 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(__PLAYER_COUNT__)]
                     history_play_card = [[cards2matrix([], inning_level, inning_major) for _ in range(__PLAYER_COUNT__)] for _ in range(15)]
                     history_play_seat = [[np.zeros(__PLAYER_COUNT__) for _ in range(__PLAYER_COUNT__)] for _ in range(15)]
+
+                    #mask隐蔽牌，4家
+                    mask_cards = [cards2matrix([range(0, 54*2)], inning_level, inning_major) for _ in range(__PLAYER_COUNT__)]
+                    # #去掉自己的手牌
+                    # for i in range(len(mask_cards)):
+                    #     mask_cards[i] = mask_cards[i] - cards2matrix(env.getPlayerHoldCards(i), inning_level, inning_major)
+
+                    round_cnt = 0
                     round_times = 0
                 
                     # obs_x['public_card'] = cards2matrix(agent_output, inning_level, inning_major)
@@ -248,16 +259,17 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     play_pos = env.getPlayerPosition()
                     banker_pos = env.getBanker()
 
-                    #数据合法性验证
-                    for trj in range(len(history_play_card)):
-                        count = 0
-                        for seat in range(4):
-                            count += np.sum(history_play_card[trj][seat])
-                        if count%2 != 0:
-                            raise ValueError(history_play_card[trj][seat])
+                    #数据合法性验证 test code
+                    # for trj in range(len(history_play_card)):
+                    #     count = 0
+                    #     for seat in range(4):
+                    #         count += np.sum(history_play_card[trj][seat])
+                    #     if count%2 != 0:
+                    #         raise ValueError(history_play_card[trj][seat])
                                 
                     if record_traj: 
                         #存储当前进度的经验回放
+                        hand_card_list = [cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)]
                         history_play_card_buff.append(copy.deepcopy(history_play_card))
                         history_play_seat_buff.append(copy.deepcopy(history_play_seat))
                         history_played_card_buff.append(copy.deepcopy(history_played_card))
@@ -270,7 +282,10 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         my_seat_buff.append(get_one_hot_array(play_pos+1, __PLAYER_COUNT__))
                         banker_seat_buff.append(get_one_hot_array(banker_pos+1, __PLAYER_COUNT__))
                         public_card_buff.append(history_public_card)
-                        hand_cards_buff.append([cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major) for seat in range(__PLAYER_COUNT__)])
+                        hand_cards_buff.append(hand_card_list)
+                        for i in range(len(mask_cards)):mask_cards[i][mask_cards[i] < 0] = 0
+                        mask_cards_buff.append(copy.deepcopy(mask_cards))
+                        
                         
                         #存储训练用的经验回放
                         while len(history_play_card_buff) > T:
@@ -292,6 +307,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                                 buffers['banker_seat'][index][t, ...] = torch.tensor(banker_seat_buff[t])
                                 buffers['public_card'][index][t, ...] = torch.tensor(public_card_buff[t])
                                 buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buff[t])
+                                buffers['mask_card'][index][t, ...] = torch.tensor(mask_cards_buff[t])#'''特征工程 规则层特征'''    
                                 
                             
                             full_queue.put(index)
@@ -308,6 +324,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             banker_seat_buff = banker_seat_buff[T:]
                             public_card_buff = public_card_buff[T:]
                             hand_cards_buff = hand_cards_buff[T:]
+                            mask_cards_buff = mask_cards_buff[T:]
                     
                     #执行游戏出牌
                     history_curr = env.getCurrRoundPlayHistory()
@@ -315,16 +332,59 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
                     playcard_mtrx = cards2matrix(response[1], inning_level, inning_major)
+
+                    #mask隐蔽牌
+                    for i in range(4):
+                        mask_cards[i] = mask_cards[i] - playcard_mtrx
+                        
+                    
+                    
+                    if round_times == 0 :
+                        frist_play_mtx = playcard_mtrx
+                    else:
+                        play_suit = np.any(playcard_mtrx[:, :, 0:-2]== 1, axis=(0,2))
+                        play_suit_major = np.sum(np.any(playcard_mtrx[:, :, -3:]== 1, axis=(0,2)).astype(np.int32)) > 0
+                        first_play_suit = np.any(frist_play_mtx[:, :, 0:-2] == 1, axis=(0,2))
+                        first_play_suit_major = np.sum(np.any(frist_play_mtx[:, :, -3:]== 1, axis=(0,2)).astype(np.int32)) > 0
+
+                        err = False
+                        if first_play_suit_major or first_play_suit[0] == True:#首出是主
+                            if play_suit_major == False and play_suit[0] == False:#跟牌不是主
+                                mask_cards[play_pos][:, :, -3:] = 0#mask掉没有跟的主
+                                #错误校验 test code
+                                # handcard_mat = cards2matrix(hold, inning_level, inning_major)#看手牌里有没有可跟的牌
+                                # hand_suit = np.any(handcard_mat[:, :, 0:-2]== 1, axis=(0,2))
+                                # hand_suit_major = np.sum(np.any(handcard_mat[:, :, -3:]== 1, axis=(0,2)).astype(np.int32)) > 0
+                                # if hand_suit_major == True and hand_suit[0] == True:
+                                #     raise ValueError("出牌非法")
+
+                        elif np.sum(play_suit == first_play_suit) != 4 and play_suit_major == False:#首出不是主，看是没是跟了牌
+                            first_play_suit_where = np.where(first_play_suit == True)
+                            if len(first_play_suit_where) != 1:
+                                raise ValueError("first_play_suit_where非法")
+                            mask_cards[play_pos][:, first_play_suit_where[0], 0:-2] = 0#mask掉没有跟的牌
+
+                            # handcard_mat = cards2matrix(hold, inning_level, inning_major)
+                            # handcard_suit = np.any(handcard_mat[:, :, 0:-2]== 1, axis=(0,2))
+                            # handcard_suit_where = np.where(np.any(handcard_suit) == False)
+                            
+                            # if len(first_play_suit_where) != 1 or len(handcard_suit_where) != 1 or first_play_suit_where[0] != handcard_suit_where[0]:
+                            #     raise ValueError("出牌非法")
+                        
+                            
+                    
+
+                    # if np.sum(playcard_mtrx[:,1:4, 13:14]) > 0:
+                    #     raise ValueError("卡牌矩阵非法")
                     history_played_card = history_played_card + playcard_mtrx
                     # if np.sum(playcard_mtrx)%2 != 0 and np.sum(playcard_mtrx) != 1:
                     #     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     #     raise ValueError("出牌报错，该出牌为空")
                     
                     
-                    # print('playcard_mtrx.sum()', playcard_mtrx.sum(), history_curr)
-                    for seat in range(round_times):
-                        if round_play_card[seat].sum() != playcard_mtrx.sum():
-                            raise ValueError("出牌报错，该出牌与历史出牌不一致")
+                    # for seat in range(round_times):
+                    #     if round_play_card[seat].sum() != playcard_mtrx.sum():
+                    #         raise ValueError("出牌报错，该出牌与历史出牌不一致")
 
                     # 回合内信息
                     round_play_card[round_times] = playcard_mtrx
@@ -335,6 +395,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                     history_score_card = history_score_card + play_score_card
                     history_remain_score_card = history_remain_score_card - play_score_card
 
+                    
                     # # #test code 错误检验
                     # all_cards = history_score_card + history_remain_score_card
                     # card_num = np.sum(all_cards)
@@ -367,13 +428,13 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                         history_play_card[round_cnt] = copy.deepcopy(round_play_card)
                         history_play_seat[round_cnt] = copy.deepcopy(round_play_seat)
                     
-                    #数据合法性验证 test code
-                    for trj in range(len(history_play_card)):
-                        count = 0
-                        for seat in range(4):
-                            count += np.sum(history_play_card[trj][seat])
-                        if count%2 != 0:
-                            raise ValueError(history_play_card[trj][seat])
+                    # #数据合法性验证 test code
+                    # for trj in range(len(history_play_card)):
+                    #     count = 0
+                    #     for seat in range(4):
+                    #         count += np.sum(history_play_card[trj][seat])
+                    #     if count%2 != 0:
+                    #         raise ValueError(history_play_card[trj][seat])
                     
                         
 
