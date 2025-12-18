@@ -135,7 +135,7 @@ class Predictor(nn.Module):
         # Assuming card_count = 2*4*15 = 112
         self.card_shape = (2, 4, 15)
         card_count = 2*4*15
-        f_dim = 8672# f_dim是所有特征提取之后展开的长度
+        f_dim = 8552# f_dim是所有特征提取之后展开的长度
         opp_head_layers = []
         for _ in range(self.num_opps-1):
             layers = []
@@ -418,10 +418,10 @@ class Predictor(nn.Module):
         banker_seat_feat = state_feat['banker_seat']#我的座位号
         mask_cards = state_feat['mask_card']#.copy()
         hand_card_feat = state_feat['hand_card']#.copy()
-        
+        public_card_feat = state_feat['public_card']
         
         # #底牌，只有庄家知道
-        # public_card_feat = state_feat['public_card']
+        # 
         # seat_equal_mask = (my_seat_feat == banker_seat_feat).sum(1) == 4
         # expanded_mask = seat_equal_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Shape: [B, 1, 1, 1]
         # expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
@@ -521,28 +521,46 @@ class Predictor(nn.Module):
             dim=0
         )
 
+        #自身手牌批次
+        my_hand_cards = []
+        for b in range(B):
+            mycard = hand_card_feat[b][my_seat_feat[b].argmax()]
+            if banker_seat_feat[b].argmax() == my_seat_idx[b]:#如果自己是庄家，再mask掉自身底牌
+                mycard = mycard +  public_card_feat[b]
+                mycard[mycard>1] = 1
+            my_hand_cards.append(mycard)
+        my_hand_cards = torch.stack(my_hand_cards, dim=0).to(device=self._device)
+        
+
         opp_logits = []
         for i in range(len(other_seat_feats)):
-            seat = other_seat_feats[i]
-            cur_mask = []
-            for b in range(seat.shape[0]):
-                s = seat[b].argmax()
-                cur_mask.append(mask_cards[b][s])
+            other_seat = other_seat_feats[i]
+            cur_mask = []#第i个玩家，批次中的mask，
+            
+            for b in range(other_seat.shape[0]):#other_seat.shape[0]就是批次
+                s = other_seat[b].argmax()
+                m = mask_cards[b][s] - my_hand_cards[b]#并且去掉自身的手牌
+                m[m<0] = 0
+                cur_mask.append(m)
             cur_mask = torch.stack(cur_mask).to(device=self._device)
 
                    
             in_feat = torch.cat([bid_card_history_feat, bid_seat_history_feat, 
                 play_card_history_feat, play_seat_history_feat,
                 play_card_round_feat, play_seat_round_feat, 
-                hand_card_feat[:, my_seat_idx].reshape(B, -1), my_seat_feat,
+                my_hand_cards.reshape(B, -1), my_seat_feat,
                 score_card_feat, 
                 cur_mask.reshape(B, -1), #这个特征影响大
                 other_seat_feats[i]], dim=-1)
             opp_logit = self.opp_heads[i](in_feat)
+            cur_mask = cur_mask.any(dim=-1).sum(dim=-2).int()
+            cur_mask[cur_mask>1] = 1
+            opp_logit = opp_logit * cur_mask
             opp_logits.append(opp_logit)
 
         opp_logits = torch.stack(opp_logits, dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
         opp_logits.transpose_(1,0)
+
         bottom_logits = self.bottom_head(in_feat)
         bottom_logits.squeeze_(1)
         

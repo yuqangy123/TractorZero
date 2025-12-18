@@ -103,8 +103,7 @@ def learn(actor_model,
                 player_idx = other_seat[i]  # [32]
                 batch_idx = torch.arange(B)  # [32]
                 # 先进制索引取出
-                other_hand_card = label_hand_card[batch_idx, player_idx]  # [32,2,4,15]
-                other_hand_card = other_hand_card[:,:,:,0:-2]
+                other_hand_card = label_hand_card[batch_idx, player_idx]
                 color_num = other_hand_card.sum(dim=(1,3))#手牌花色数量分布, bug，没有排除大小王列
                 label_hand_card_color_num.append(color_num)
                 hand_card_num.append(color_num.sum(dim=-1).long())
@@ -123,7 +122,7 @@ def learn(actor_model,
             
             
             # end_event.record()
-            # torch.cuda.synchronize()
+             # torch.cuda.synchronize()
             # print("Forward time (ms):", start_event.elapsed_time(end_event))
             
             loss_opp = F.mse_loss(opp_logits, label_hand_card_color_num, reduction='none')#[batch_size, 4, 4]
@@ -192,9 +191,9 @@ def learn(actor_model,
             #梯度更新
             # loss_total = loss_opp.mean() + loss_pub.mean()
             loss_total = loss_opp.mean()
-            # cardnum_m = label_hand_card_color_num.sum().long().item()//3#平均牌预测数量
+            cardnum_m = label_hand_card_color_num.sum().long().item()#平均牌预测数量
             l = loss_total.item()
-            print(f"loss_opp_:{l:.3f}")
+            print(f"loss_opp_:{l:.3f}, {cardnum_m}")
 
             # if cardnum_m == 1: 
             #     _writer_loss_opp_1.add_scalar(f'loss_opp_1', l, g_learn_count[0]) 
