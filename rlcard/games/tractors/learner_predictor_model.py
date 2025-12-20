@@ -103,8 +103,10 @@ def learn(actor_model,
                 player_idx = other_seat[i]  # [32]
                 batch_idx = torch.arange(B)  # [32]
                 # 先进制索引取出
-                other_hand_card = label_hand_card[batch_idx, player_idx]
+                other_hand_card = label_hand_card[batch_idx, player_idx, :, :, :-3]
                 color_num = other_hand_card.sum(dim=(1,3))#手牌花色数量分布, bug，没有排除大小王列
+                other_majorhand_card = label_hand_card[batch_idx, player_idx, :, :, -3:]
+                color_num[:, :, 0] += other_majorhand_card[:]
                 label_hand_card_color_num.append(color_num)
                 hand_card_num.append(color_num.sum(dim=-1).long())
 
@@ -129,7 +131,8 @@ def learn(actor_model,
             loss_pub = F.mse_loss(public_card_logits, label_public_card_socre, reduction='none')#[batch_size]
 
             #当前4个玩家真实的手牌数, 归一化，用于乘以loss，做置信度
-            # hand_card_num = label_hand_card.view(B,label_hand_card.size(1),-1).sum(-1).long() #【batch_size,4】
+            # hand_card_num = label_hand_card.view(B,label
+            # _hand_card.size(1),-1).sum(-1).long() #【batch_size,4】
             hand_card_num_norm = (25.0 - hand_card_num)/25.0#【batch_size,4】
 
             
@@ -191,7 +194,7 @@ def learn(actor_model,
             #梯度更新
             # loss_total = loss_opp.mean() + loss_pub.mean()
             loss_total = loss_opp.mean()
-            cardnum_m = label_hand_card_color_num.sum().long().item()#平均牌预测数量
+            cardnum_m = label_hand_card_color_num.sum().long().item()/B#平均牌预测数量
             l = loss_total.item()
             print(f"loss_opp_:{l:.3f}, {cardnum_m}")
 

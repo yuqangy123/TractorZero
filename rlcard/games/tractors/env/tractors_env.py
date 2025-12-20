@@ -326,6 +326,8 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             hand_cards_buff = hand_cards_buff[T:]
                             mask_cards_buff = mask_cards_buff[T:]
                     
+                    
+
                     #执行游戏出牌
                     history_curr = env.getCurrRoundPlayHistory()
                     hold = env.getPlayerHoldCards(play_pos)
@@ -362,7 +364,7 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             first_play_suit_where = np.where(first_play_suit == True)
                             if len(first_play_suit_where) != 1:
                                 raise ValueError("first_play_suit_where非法")
-                            mask_cards[play_pos][:, first_play_suit_where[0], 0:-2] = 0#mask掉没有跟的牌
+                            mask_cards[play_pos][:, first_play_suit_where[0], 0:-3] = 0#mask掉没有跟的牌
 
                             # handcard_mat = cards2matrix(hold, inning_level, inning_major)
                             # handcard_suit = np.any(handcard_mat[:, :, 0:-2]== 1, axis=(0,2))
@@ -370,6 +372,8 @@ def run(i, device, actor, free_queue, full_queue, buffers, flags):
                             
                             # if len(first_play_suit_where) != 1 or len(handcard_suit_where) != 1 or first_play_suit_where[0] != handcard_suit_where[0]:
                             #     raise ValueError("出牌非法")
+                        
+                                
                         
                             
                     
