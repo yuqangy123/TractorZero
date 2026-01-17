@@ -15,7 +15,7 @@ from rlcard.utils.file_writer import FileWriter
 from rlcard.games.tractors.models import tractorActor
 from .env.tractors_env import run
 from ctypes import c_int, c_float, c_double, c_bool
-from rlcard.games.tractors import learner_predictor_model
+from rlcard.games.tractors import learner_predictor_model_houqi
 
 
 # from .utils import get_batch, log, create_env, create_buffers, create_optimizers, act
@@ -154,7 +154,7 @@ def train(flags):
     learner_actor = {'predictor':tractorActor(device=device, args=flags)}
 
     # model optimizer
-    optimizers = {'predictor':learner_predictor_model.create_optimizer(lr=flags.lr, learner_model=learner_actor['predictor'].get_model('predictor'))}
+    optimizers = {'predictor':learner_predictor_model_houqi.create_optimizer(lr=flags.lr, learner_model=learner_actor['predictor'].get_model('predictor'))}
     
 
     # Stat Keys
@@ -205,8 +205,8 @@ def train(flags):
         print('batch_and_learn_predictor_model', tid)
         while frames['predictor'] < flags.total_frames:
             #单线程运行，否则learn_epic_count['predictor']会读错数据
-            batch = learner_predictor_model.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
-            _stats = learner_predictor_model.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock, learn_epic_count['predictor'])
+            batch = learner_predictor_model_houqi.get_batch(free_queue[device], full_queue[device], belief_buffer[device], flags, local_lock)
+            _stats = learner_predictor_model_houqi.learn(actors[device], learner_actor['predictor'], batch, optimizers['predictor'], device, flags, mean_episode_return_buf, position_lock, learn_epic_count['predictor'])
 
             with lock:
                 for k in _stats:
