@@ -24,6 +24,12 @@ __PLAYER_COUNT__ = 4
 __CARDS_NUM__ = (54*2)
 __HAND_CARD_NUM__ = 25#手牌数量
 
+#牌类型
+__SINGLE__ = 0
+__PAIR__ = 1
+__TRACTOR__ = 2
+__SUSPECT__ = 3
+
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 15: 11, 17: 12}
 
@@ -371,4 +377,8 @@ __all__ = [
     "get_one_hot_array",
     "get_full_hot_array",
     "matrix2cards",
+    '__SINGLE__',
+    '__PAIR__',
+    '__TRACTOR__' ,
+    '__SUSPECT__',
 ]

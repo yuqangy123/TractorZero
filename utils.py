@@ -8,7 +8,7 @@ import time
 
 import torch 
 
-
+#tractor_botzone引用的是这个
 ###############################################################
 # 牌面表示：数字
 # h:红桃 d:方片 s:黑桃 c:草花 
@@ -23,6 +23,12 @@ __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
 __CARDSCALE_COUNT__ = 14 #点数
 __PLAYER_COUNT__ = 4
 __CARDS_NUM__ = (54*2)
+
+#牌类型
+__SINGLE__ = 0
+__PAIR__ = 1
+__TRACTOR__ = 2
+__SUSPECT__ = 3
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
@@ -287,4 +293,8 @@ __all__ = [
     '__POINT__',
     "__PLAYER_COUNT__",
     "__CARDS_NUM__",
+    '__SINGLE__',
+    '__PAIR__',
+    '__TRACTOR__' ,
+    '__SUSPECT__',
 ]

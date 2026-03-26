@@ -127,9 +127,9 @@ class Predictor(nn.Module):
 
         '''
         #self.attention_play = AttentionLayer(hidden_dim*2, hidden_dim)
-        self.attention_play = AttentionLayer( hidden_dim)
-        self.attention_bid = AttentionLayer( hidden_dim)
-        self.attention_round = AttentionLayer( hidden_dim)
+        self.attention_play = AttentionLayer( hidden_dim+4)
+        self.attention_bid = AttentionLayer( hidden_dim+4)
+        self.attention_round = AttentionLayer( hidden_dim+4)
 
 
         # Assuming card_count = 2*4*15 = 112
@@ -166,240 +166,183 @@ class Predictor(nn.Module):
         # self.important_head = nn.Linear(hidden_dim, k_important)
         # optional small critic for internal eval (not used necessarily)
         
-    # def forward1(self, state_feat, isTrain = None):
-    #     play_card_history_feat = state_feat['history_play_card']#历史出牌
-    #     play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
-    #     played_card_history_feat=state_feat['history_played_card']#已出过的牌
-    #     bid_card_history_feat = state_feat['history_bid_card']#報主記錄
-    #     bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
-    #     #当前回合牌
-    #     play_card_round_feat = state_feat['round_play_card']
-    #     play_seat_round_feat = state_feat['round_play_seat']
-
-    #     score_card_feat = state_feat['score_card']#分數牌
-    #     score_remain_card_feat = state_feat['remain_score_card']#分數牌
-    #     my_seat_feat = state_feat['my_seat']#我的座位号
-    #     banker_seat_feat = state_feat['banker_seat']#庄家号
-    #     if isTrain:
-    #         player_hand_card_num = state_feat['hand_card'].sum(dim=(2,3,4))#玩家剩余手牌数
-
-    #     #底牌，只有庄家知道
-    #     public_card_feat = state_feat['public_card']
-    #     seat_equal_mask = (my_seat_feat == banker_seat_feat).sum(1) == 4
-    #     expanded_mask = seat_equal_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Shape: [B, 1, 1, 1]
-    #     expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
-    #     public_card_feat = public_card_feat * expanded_mask.float()# Zero out public_card_feat where mask is False
-
-    #     #mask可见牌
-    #     mask_card = state_feat['history_played_card'].detach() + state_feat['history_bid_card'].sum(dim=1).detach() #[B, seat, 2, 4, 15]
-    #     mask_card = mask_card.clamp(min=0.0, max=1.0)
-    #     mask_card = 1 - mask_card
-    #     mask_card[:,:,1:4,14] = 0.0
+    def forward_cnn(self, state_feat, isTrain = None):
+        B = state_feat['history_play_seat'].shape[0]#批次
+        play_card_history_feat = state_feat['history_play_card']#历史出牌
+        play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
+        played_card_history_feat=state_feat['history_played_card']#已出过的牌
+        bid_card_history_feat = state_feat['history_bid_card']#報主記錄
+        bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
         
+        play_card_round_feat = state_feat['round_play_card']#当前回合牌
+        play_seat_round_feat = state_feat['round_play_seat']#当前回合牌
 
-    #     #多次动作组成的一轮数据，将多次打平成第三维 
-    #     b, a, c, d, e, f = play_card_history_feat.shape
+        score_card_feat = state_feat['score_card']#分數牌
+        score_remain_card_feat = state_feat['remain_score_card']#分數牌
+        my_seat_feat = state_feat['my_seat']#我的座位号
+        banker_seat_feat = state_feat['banker_seat']#我的座位号
+        mask_cards = state_feat['mask_card']#.copy()
+        hand_card_feat = state_feat['hand_card']#.copy()
+        public_card_feat = state_feat['public_card']
 
-    #     # #test code 检查数据合法性
-    #     # for i in range(b):
-    #     #     #校验出牌历史    
-    #     #     played_card = torch.zeros_like(play_card_history_feat[0,0,0]).to(self._device)
-    #     #     for j in range(a):
-    #     #         #出牌
-    #     #         his_play_card_cnt = play_card_history_feat[i,j,0].sum().item()
-    #     #         for k in range(4):
-    #     #             if his_play_card_cnt != play_card_history_feat[i,j,k].sum().item() or his_play_card_cnt < 1.0:
-    #     #                 raise KeyError(play_card_history_feat[i,j])#bug
-    #     #             his_play_card_cnt = play_card_history_feat[i,j,k].sum().item()
-    #     #             played_card = played_card + play_card_history_feat[i,j,k]
-    #     #             #座位号
-    #     #             his_play_seat_cnt = play_seat_history_feat[i,j,k].sum().item()
-    #     #             if his_play_seat_cnt != 1:
-    #     #                 raise KeyError(play_seat_history_feat[i,j])#bug
-            
-    #     #     #校验叫主
-    #     #     for j in range(bid_card_history_feat.shape[1]):
-    #     #         if bid_card_history_feat[i][j].sum() == 0 and bid_seat_history_feat[i][j].sum() > 0:
-    #     #             raise KeyError(bid_card_history_feat[i,j])#bug
-    #     #         if bid_card_history_feat[i][j].sum() > 0 and bid_seat_history_feat[i][j].sum() == 0:
-    #     #             raise KeyError(bid_seat_history_feat[i,j])#bug
+        ################################################################################
 
-    #     #     #校验回合牌
-    #     #     for j in range(play_card_round_feat.shape[1]):
-    #     #         if play_card_round_feat[i][j].sum() == 0 and play_seat_round_feat[i][j].sum() > 0:
-    #     #             raise KeyError(play_card_round_feat[i,j])#bug
-    #     #         if play_card_round_feat[i][j].sum() > 0 and play_seat_round_feat[i][j].sum() == 0:
-    #     #             raise KeyError(play_seat_round_feat[i,j])#bug
-    #     #         played_card = played_card + play_card_round_feat[i,j]
-
-    #     #     # 校验已出过的牌
-    #     #     if play_card_history_feat[i][14][0].sum() == 0 and (played_card_history_feat[i] != played_card).sum().long() > 0:
-    #     #         raise KeyError(played_card_history_feat[i])#bug
-            
-    #     #     #校验分數牌
-    #     #     score_card = score_card_feat[i] + score_remain_card_feat[i]
-    #     #     if (score_card.long().sum() != 24 or score_card == 1.0).sum() != 24:
-    #     #         raise KeyError(score_card_feat[i][i])#bug
-            
-    #     #     #校验座位号
-    #     #     if my_seat_feat[i].sum().long() != 1 or banker_seat_feat[i].sum().long() != 1:
-    #     #         raise KeyError(score_card_feat[i][i])#bug
-
-    #     #     #校验底牌
-    #     #     if(state_feat['public_card'][i].sum().long() != 8):
-    #     #         raise KeyError(state_feat['public_card'][i])
-            
-    #     #     #校验所有牌
-    #     #     if (played_card_history_feat[i] + mask_card[i] + bid_card_history_feat[i][0] + bid_card_history_feat[i][1]).clamp(min=0.0, max=1.0).sum().long() != 108:
-    #     #         raise KeyError(public_card_feat[i])
+        # #底牌，只有庄家知道
+        # public_card_feat = state_feat['public_card']
+        # seat_equal_mask = (my_seat_feat == banker_seat_feat).sum(1) == 4
+        # expanded_mask = seat_equal_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Shape: [B, 1, 1, 1]
+        # expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
+        # public_card_feat = public_card_feat * expanded_mask.float()# Zero out public_card_feat where mask is False
 
 
 
-    #     play_card_history_feat = play_card_history_feat.reshape(b, a*c, d, e, f)
-    #     b, a, c, d = play_seat_history_feat.shape
-    #     play_seat_history_feat = play_seat_history_feat.reshape(b, a*c, d)
-    #     b, a, c, d, e = bid_card_history_feat.shape
+        #多次动作组成的一轮数据，将多次打平成第三维 
+        b, a, c, d, e, f = play_card_history_feat.shape
+        play_card_history_feat = play_card_history_feat.reshape(b, a*c, d, e, f)
+        b, a, c, d = play_seat_history_feat.shape
+        play_seat_history_feat = play_seat_history_feat.reshape(b, a*c, d)
+        b, a, c, d, e = bid_card_history_feat.shape
 
-    #     bid_card_history_feat = bid_card_history_feat.reshape(b, a, c, d, e)
-    #     b, a, c = bid_seat_history_feat.shape
-    #     bid_seat_history_feat = bid_seat_history_feat.reshape(b, a, c)
-    #     b, a, c, d, e = play_card_round_feat.shape
-    #     play_card_round_feat = play_card_round_feat.reshape(b, a, c, d, e)
-    #     b, a, c = play_seat_round_feat.shape
-    #     play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
+        bid_card_history_feat = bid_card_history_feat.reshape(b, a, c, d, e)
+        b, a, c = bid_seat_history_feat.shape
+        bid_seat_history_feat = bid_seat_history_feat.reshape(b, a, c)
+        b, a, c, d, e = play_card_round_feat.shape
+        play_card_round_feat = play_card_round_feat.reshape(b, a, c, d, e)
+        b, a, c = play_seat_round_feat.shape
+        play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
         
         
         
-    #     # play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)#一个card_encoder花费40ms
+        # play_card_history_enocdefeat = self.card_encoder(play_card_history_feat)#一个card_encoder花费40ms
 
-    #     card_feature_dict = {
-    #         'play_history': play_card_history_feat.reshape(-1, 2, 4, 15),
-    #         'bid_history': bid_card_history_feat.reshape(-1, 2, 4, 15),
-    #         'round_history': play_card_round_feat.reshape(-1, 2, 4, 15),
-    #         'played_history': played_card_history_feat,
-    #         # 'score_card': score_card_feat,
-    #         # 'score_remain': score_remain_card_feat,
-    #         'public_card': public_card_feat,
-    #         'mask_card': mask_card
-    #     }
-
-        
-    #     # Concatenate all features along batch dimension
-    #     batched_features = torch.cat(list(card_feature_dict.values()), dim=0)
-
-    #     # Single encoder call
-    #     encoded_features = self.card_encoder(batched_features)
-
-    #     # Split and reshape back
-    #     split_sizes = [v.shape[0] for v in card_feature_dict.values()]
-    #     split_features = torch.split(encoded_features, split_sizes, dim=0)
-
-    #     # Reconstruct individual features
-    #     features_iter = iter(split_features)
-    #     play_card_history_enocdefeat = next(features_iter).reshape(
-    #         play_card_history_feat.shape[0], play_card_history_feat.shape[1], -1)
-    #     bid_card_history_encodefeat = next(features_iter).reshape(
-    #         bid_card_history_feat.shape[0], bid_card_history_feat.shape[1], -1)
-    #     round_card_history_encodefeat = next(features_iter).reshape(
-    #         play_card_round_feat.shape[0], play_card_round_feat.shape[1], -1)
-    #     played_card_history_encodefeat = next(features_iter)
-    #     # score_card_encodefeat = next(features_iter)
-    #     # score_remain_card_encodefeat = next(features_iter)
-    #     public_card_encodefeat = next(features_iter)
-    #     mask_card_encodefeat = next(features_iter)
-    #     '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
-    #     再将原来4个人的座位号展平，再将两个特征拼接在一起，
-    #     也可以使用交替凭借，
-    #     不过，需要注意的是，在实际应用场景中，交替拼接可能不如传统的特征拼接有效，因为：
-    #     语义分离：交替拼接可能会破坏特征原有的语义结构
-    #     网络学习难度增加：神经网络可能更难从交错特征中学习模式
-    #     维度不匹配问题：如果两个张量的最后一维大小不同，交错拼接会更加复杂
-    #     这种拼接方式让LSTM能够：
-    #     独立学习卡牌出牌和座位位置的时间依赖关系
-    #     必要时分别关注卡牌特征和座位特征
-    #     清晰区分不同类型的特征'''
-    #     # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
-    #     play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
-    #     h_play, (_, _) = self.lstm(play_history_feat)
-    #     # 使用注意力机制替代直接取最后一个时间步
-    #     h_play = self.attention_play(h_play) # [B, hidden_dim*2] -> [B, hidden_dim*2]
-
-    #     # bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
-    #     bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
-    #     h_bid, (_, _) = self.lstm(bid_history_feat)
-    #     # 使用注意力机制
-    #     h_bid = self.attention_bid(h_bid) # [B, hidden_dim*2]
-
-    #     # round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
-    #     round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
-    #     h_round, (_, _) = self.lstm(round_history_feat)
-    #     # 使用注意力机制
-    #     h_round = self.attention_round(h_round) # [B, hidden_dim*2]
-
-
-    #     # played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
-    #     # score_card_encodefeat = self.card_encoder(score_card_feat)
-    #     # score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
-
-    #     # public_card_encodefeat = self.card_encoder(public_card_feat)
-        
+        card_feature_dict = {
+            'play_history': play_card_history_feat.reshape(-1, 2, 4, 15),
+            'bid_history': bid_card_history_feat.reshape(-1, 2, 4, 15),
+            'round_history': play_card_round_feat.reshape(-1, 2, 4, 15),
+            'played_history': played_card_history_feat,
+            'score_remain': score_remain_card_feat,
+            # 'public_card': public_card_feat,
+            'mask_card': mask_cards
+        }
 
         
-    #     # mask_card_encodefeat = self.card_encoder(mask_card)
+        # Concatenate all features along batch dimension
+        batched_features = torch.cat(list(card_feature_dict.values()), dim=0)
 
-    #     #特征融合
-    #     batch_size = my_seat_feat.shape[0]
-    #     # h_play = h_play.reshape(batch_size, -1)
-    #     # h_round = h_round.reshape(batch_size, -1)
-    #     # h_bid = h_bid.reshape(batch_size, -1)
-        
-    #     in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, 
-    #                         #  score_card_encodefeat, score_remain_card_encodefeat, 
-    #                          mask_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
-        
-    #     #这两个加起来也就12ms左右
-    #     opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
-    #     opp_logits.transpose_(1,0)
+        # Single encoder call
+        encoded_features = self.card_encoder(batched_features)
 
-    #     #对超过手牌数的回归值上线进行截断
-    #     # if isTrain:
-    #     #     player_hand_card_num = player_hand_card_num.unsqueeze(-1).expand(-1, -1, opp_logits.shape[-1])
-    #     #     opp_logits.clamp_(max=player_hand_card_num)
+        # Split and reshape back
+        split_sizes = [v.shape[0] for v in card_feature_dict.values()]
+        split_features = torch.split(encoded_features, split_sizes, dim=0)
+
+        # Reconstruct individual features
+        features_iter = iter(split_features)
+        play_card_history_enocdefeat = next(features_iter).reshape(
+            play_card_history_feat.shape[0], play_card_history_feat.shape[1], -1)
+        bid_card_history_encodefeat = next(features_iter).reshape(
+            bid_card_history_feat.shape[0], bid_card_history_feat.shape[1], -1)
+        round_card_history_encodefeat = next(features_iter).reshape(
+            play_card_round_feat.shape[0], play_card_round_feat.shape[1], -1)
+        played_card_history_encodefeat = next(features_iter)
+        # score_card_encodefeat = next(features_iter)
+        score_remain_card_encodefeat = next(features_iter)
+        # public_card_encodefeat = next(features_iter)
+        mask_card_encodefeat = next(features_iter)
+
+        '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
+        再将原来4个人的座位号展平，再将两个特征拼接在一起，
+        也可以使用交替凭借，
+        不过，需要注意的是，在实际应用场景中，交替拼接可能不如传统的特征拼接有效，因为：
+        语义分离：交替拼接可能会破坏特征原有的语义结构
+        网络学习难度增加：神经网络可能更难从交错特征中学习模式
+        维度不匹配问题：如果两个张量的最后一维大小不同，交错拼接会更加复杂
+        这种拼接方式让LSTM能够：
+        独立学习卡牌出牌和座位位置的时间依赖关系
+        必要时分别关注卡牌特征和座位特征
+        清晰区分不同类型的特征'''
+        # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
+        play_history_feat = torch.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
+        h_play, (_, _) = self.lstm(play_history_feat)
+        # 使用注意力机制替代直接取最后一个时间步
+        h_play_att = self.attention_play(play_history_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
+        h_play += h_play_att
+
+        # bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
+        bid_history_feat = torch.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
+        h_bid, (_, _) = self.lstm(bid_history_feat)
+        # 使用注意力机制
+        h_bid_att = self.attention_bid(bid_history_feat) # [B, hidden_dim*2]
+        h_bid += h_bid_att
+
+        # round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
+        round_history_feat = torch.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
+        h_round, (_, _) = self.lstm(round_history_feat)
+        # 使用注意力机制
+        h_round_att = self.attention_round(round_history_feat) # [B, hidden_dim*2]
+        h_round += h_round_att
+
+        #挨个对扑克二维特征进行提取
+        # played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
+        # score_card_encodefeat = self.card_encoder(score_card_feat)
+        # score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
+        # public_card_encodefeat = self.card_encoder(public_card_feat)        
+        # mask_card_encodefeat = self.card_encoder(mask_card)
+
+        #特征融合
+        h_play = h_play.reshape(B, -1)
+        h_bid = h_bid.reshape(B, -1)
+        h_round = h_round.reshape(B, -1)
+        
+        
+        in_feat = torch.cat([h_play, h_bid, h_round, 
+                             played_card_history_encodefeat, score_remain_card_encodefeat, 
+                             mask_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
+        
+        #这两个加起来也就12ms左右
+        opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
+        opp_logits.transpose_(1,0)
+
+        #对超过手牌数的回归值上线进行截断
+        # if isTrain:
+        #     player_hand_card_num = player_hand_card_num.unsqueeze(-1).expand(-1, -1, opp_logits.shape[-1])
+        #     opp_logits.clamp_(max=player_hand_card_num)
             
 
-    #     bottom_logits = self.bottom_head(in_feat)
-    #     bottom_logits.squeeze_(1)
+        bottom_logits = self.bottom_head(in_feat)
+        bottom_logits.squeeze_(1)
         
-    #     return opp_logits, bottom_logits
+        return opp_logits, bottom_logits
 
 
-    #     # 直接预测手牌分布
-    #     # in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, 
-    #     #                      score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
-    #     # opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
-    #     # bottom_logits = self.bottom_head(in_feat)  # [B, output_dim]
-    #     # # important_logits = self.important_head(h)           # [B, K]
-    #     # # Update the probability calculation accordingly:
-    #     # opp_probs = torch.sigmoid(opp_logits).view(self.num_opps, -1, *self.card_shape)  # [num_opps, B, 2, 4, 15]#智能体预测4家手牌的概率
-    #     # bottom_prob = torch.sigmoid(bottom_logits).view(-1, *self.card_shape)             # [B, 2, 4, 15]
-    #     # # important_prob = torch.sigmoid(important_logits)       # multi-label probabilities
+        # 直接预测手牌分布
+        # in_feat = torch.cat([h_play, h_round, h_bid, played_card_history_encodefeat, public_card_encodefeat, 
+        #                      score_card_encodefeat, score_remain_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
+        # opp_logits = torch.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
+        # bottom_logits = self.bottom_head(in_feat)  # [B, output_dim]
+        # # important_logits = self.important_head(h)           # [B, K]
+        # # Update the probability calculation accordingly:
+        # opp_probs = torch.sigmoid(opp_logits).view(self.num_opps, -1, *self.card_shape)  # [num_opps, B, 2, 4, 15]#智能体预测4家手牌的概率
+        # bottom_prob = torch.sigmoid(bottom_logits).view(-1, *self.card_shape)             # [B, 2, 4, 15]
+        # # important_prob = torch.sigmoid(important_logits)       # multi-label probabilities
 
         
         
-    #     # # enumerate(state_feat['history_play_card'])
-    #     # # for bat, player_play_cards in enumerate(state_feat['history_play_card']):
-    #     # #     for seat_idx, play_card in enumerate(player_play_cards):
-    #     # #         mask_card[play_seat_history_feat[round_idx][seat_idx]] += play_card
+        # # enumerate(state_feat['history_play_card'])
+        # # for bat, player_play_cards in enumerate(state_feat['history_play_card']):
+        # #     for seat_idx, play_card in enumerate(player_play_cards):
+        # #         mask_card[play_seat_history_feat[round_idx][seat_idx]] += play_card
         
         
-    #     # # opp_probs = torch.from_numpy(np.array([opp_prob*mask_card for opp_prob in opp_probs])).to(self._device)
-    #     # # Transpose to get the desired shape [B, num_opps, 2, 4, 15]:
-    #     # opp_probs = opp_probs*mask_card#mask_card自动广播到opp_probs相同的形状
-    #     # opp_probs = torch.transpose(opp_probs, 0, 1)
-    #     # bottom_prob = bottom_prob*mask_card
+        # # opp_probs = torch.from_numpy(np.array([opp_prob*mask_card for opp_prob in opp_probs])).to(self._device)
+        # # Transpose to get the desired shape [B, num_opps, 2, 4, 15]:
+        # opp_probs = opp_probs*mask_card#mask_card自动广播到opp_probs相同的形状
+        # opp_probs = torch.transpose(opp_probs, 0, 1)
+        # bottom_prob = bottom_prob*mask_card
         
         
-    #     # return opp_probs, bottom_prob
+        # return opp_probs, bottom_prob
+
 
     def forward(self, state_feat, isTrain = None):
         B = state_feat['history_play_seat'].shape[0]#批次
