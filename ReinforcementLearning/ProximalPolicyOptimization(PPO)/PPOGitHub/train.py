@@ -6,7 +6,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_file", type=str, help="your config file path",
                         #default="./ProximalPolicyOptimization(PPO)/PPOGitHub/config.yaml")
-                        default="E:/论文/强化学习/TractorZero/ReinforcementLearning/ProximalPolicyOptimization(PPO)/PPOGitHub/config.yaml")
+                        default="D:/work/TractorZero/ReinforcementLearning/ProximalPolicyOptimization(PPO)/PPOGitHub/config.yaml")
+    
     args = parser.parse_args()
     with open(args.config_file, 'r') as stream:
         config = yaml.load(stream, Loader=yaml.FullLoader)

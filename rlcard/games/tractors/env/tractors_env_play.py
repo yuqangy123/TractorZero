@@ -51,7 +51,7 @@ class TractorsEnv(Game):
         if len(bid_pok) > 0:
             hold_card = get_card+hold_card
             #手牌, 竞价亮的牌， 亮牌历史（自己位置是第一顺位），  自己待发牌张数， 未发牌
-            hold_card_feature = cards2matrix(hold_card, level)
+            hold_card_feature = cards2matrix(hold_card)
 
             # major_card = cards2matrix([major_card])
             
@@ -335,7 +335,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     banker = env.getBanker()
                     seat = env.getPlayerPosition()
                     hold_cards = env.getPlayerHoldCards(banker)
-                    inning_major = env.getMajor()
+                    inning_major = env.getMajorColor()
                     inning_level = env.getLevel()
                     
                     #self, public_card, hold_card, own_seat, bid_history, level, major
@@ -345,34 +345,34 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     # response = [banker, env.cover_PubEx(publiccard, hold_cards, inning_level)]
                     obs_x = {}
 
-                    history_level_card = cards2matrix([], inning_level, inning_major)
+                    history_level_card = cards2matrix([])
                     history_level_card[:,0,:] = 1
                     history_level_card[:,:,12] = 1                    
                     obs_x['level_card'] = history_level_card#历史级牌
                     
                     #埋牌回放经验
-                    # cover_cards_buff.append(cards2matrix(agent_output, inning_level, inning_major))
-                    # cover_hand_cards_buff.append(cards2matrix(hold_cards, inning_level, inning_major))
-                    # cover_partner_bid_card_buff = cards2matrix([], inning_level, inning_major)
-                    # cover_rival_bid_card_buff = cards2matrix([], inning_level, inning_major)
+                    # cover_cards_buff.append(cards2matrix(agent_output))
+                    # cover_hand_cards_buff.append(cards2matrix(hold_cards))
+                    # cover_partner_bid_card_buff = cards2matrix([])
+                    # cover_rival_bid_card_buff = cards2matrix([])
 
                     # cover_level_card_buff = history_level_card
                     # for bids in bid_trajectory:
                     #     if (bids[0]+2)%__PLAYER_COUNT__ == seat:
-                    #         cover_partner_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
+                    #         cover_partner_bid_card_buff += cards2matrix(bids[1])
                     #     else:
-                    #         cover_rival_bid_card_buff += cards2matrix(bids[1], inning_level, inning_major)
+                    #         cover_rival_bid_card_buff += cards2matrix(bids[1])
                     
 
                     #更新对局缓存信息
-                    history_score_card = cards2matrix([], inning_level, inning_major)
+                    history_score_card = cards2matrix([])
                     obs_x['score_card'] = history_score_card#历史分得分牌
                     history_remain_score_card = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
                     history_remain_score_card = env.Pokers2Num(history_remain_score_card,[])
                     history_remain_score_card.extend([c+54 for c in history_remain_score_card])
-                    obs_x['remain_score_card'] = cards2matrix(history_remain_score_card, inning_level, inning_major)#历史剩余分数牌
-                    obs_x['played_cards'] = cards2matrix([], inning_level, inning_major)#历史所有已出牌
-                    obs_x['public_card'] = cards2matrix(agent_output, inning_level, inning_major)
+                    obs_x['remain_score_card'] = cards2matrix(history_remain_score_card)#历史剩余分数牌
+                    obs_x['played_cards'] = cards2matrix([])#历史所有已出牌
+                    obs_x['public_card'] = cards2matrix(agent_output)
                     obs_x['banker'] = env.getBanker()
 
 
@@ -396,7 +396,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                 elif stage == "play":
                     history = env.getPlayHistory()
                     seat = env.getPlayerPosition()
-                    hand_cards = cards2matrix(env.getPlayerHoldCards(seat), inning_level, inning_major)
+                    hand_cards = cards2matrix(env.getPlayerHoldCards(seat))
                                         
                     response = env.getLegalActions(history[1], env.getPlayerHoldCards(seat) , inning_level)
                     fixed_action_card = []
@@ -421,7 +421,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
                     obs_x['player_remain_card_num'] = round_player_remain_card_num                    
                     obs_x['team'] = (obs_x['banker']==seat or obs_x['banker']==(seat+2)%4) and 1 or 2
                     mat_action_card = actor.playCard(obs_x, fixed_action_card, discard_action_card, discard_num, obs_x['team'], obs_x['banker'])
-                    action = matrix2cards(mat_action_card, inning_level, inning_major)
+                    action = matrix2cards(mat_action_card)
                     
                     #历史出牌分3部分，出牌，出牌座位号，阵营
                     response = [env.getPlayerPosition(), action]
@@ -496,7 +496,7 @@ def run(i, device, actor, play_free_queue, play_full_queue, cover_free_queue, co
 
                     #更新捡到的分牌和剩余的分牌
                     score_pok = env.getLastRoundScorePoke()
-                    mat_s = cards2matrix(score_pok, inning_level, inning_major)
+                    mat_s = cards2matrix(score_pok)
                     obs_x['score_card'] += mat_s
                     obs_x['remain_score_card'] -= mat_s
 

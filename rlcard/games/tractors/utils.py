@@ -20,9 +20,12 @@ __CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
 __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
 __MAJOR__ = ['jo', 'Jo']#小王 大王
 __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
-__PLAYER_COUNT__ = 4
-__CARDS_NUM__ = (54*2)
+__PLAYER_COUNT__ = 3
+__CARDS_NUM__ = (108)
+
 __HAND_CARD_NUM__ = 25#手牌数量
+
+__MAX_SCORE__ = 40#最多分数，1个代表5分
 
 #牌类型
 __SINGLE__ = 0
@@ -218,7 +221,8 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
 # print(matrix)
 # print(matrix == matrix_cp)
 #扑克牌(number)转矩阵
-def cards2matrix(list_cards, level='K', major='s'):
+# def cards2matrix(list_cards, level='K', major='s'):
+def cards2matrix(list_cards):
     """
         'A','2','3','4','5','6','7','8','9','0','J','Q','K','o','O'
     s    0   0   0   0   0   0   0   0   0   0   0   0   0   1   1
@@ -226,7 +230,7 @@ def cards2matrix(list_cards, level='K', major='s'):
     c    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
     d    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
     [2, 4, 15]
-    kernel为2*2 更关注对子
+    kernel为2*2 更关注对子, 游戏中没有3和4
 
 
            s   h   c   d
@@ -256,29 +260,21 @@ def cards2matrix(list_cards, level='K', major='s'):
     matrix = matrix.reshape(2,15,4)
     matrix = np.transpose(matrix, (0,2,1))
 
-    # 根据级数调整列顺序数组
-    # new_order = list(range(matrix.shape[2]))
-    level = __CARDSCALE__.index(level)
-    if level != 12:
-        view = matrix[:,:,level:-2]
-        view[:]=np.roll(view, shift=-1, axis=2)
+    # # 根据级数调整列顺序数组
+    # # new_order = list(range(matrix.shape[2]))
+    # level = __CARDSCALE__.index(level)
+    # if level != 12:
+    #     view = matrix[:,:,level:-2]
+    #     view[:]=np.roll(view, shift=-1, axis=2)
 
-    # 根据主花色调整行序列数组
-    major = __SUITSET__.index(major)
-    if major != 0:
-        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+    # # 根据主花色调整行序列数组
+    # major = __SUITSET__.index(major)
+    # if major != 0:
+    #     matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
     return matrix
 
-def matrix2cards(mat, level='K', major='s'):
-    level = __CARDSCALE__.index(level)
-    if level != 12:
-        view = mat[:,:,level:-2]
-        view[:]=np.roll(view, shift=1, axis=2)
-
-    major = __SUITSET__.index(major)
-    if major != 0:
-        mat[:, [0,major], 0:13] = mat[:, [major,0], 0:13]
-
+#修改了，没做过测试
+def matrix2cards(mat):    
     mat = np.transpose(mat, (0,2,1))
     cards = mat.flatten()
     # 获取指定索引的元素
@@ -286,6 +282,24 @@ def matrix2cards(mat, level='K', major='s'):
     # 获取selected_cards中值为1的索引
     indices = np.where(np.array(selected_cards) == 1)[0]
     return indices
+
+# def matrix2cards(mat, level='K', major='s'):
+#     level = __CARDSCALE__.index(level)
+#     if level != 12:
+#         view = mat[:,:,level:-2]
+#         view[:]=np.roll(view, shift=1, axis=2)
+
+#     major = __SUITSET__.index(major)
+#     if major != 0:
+#         mat[:, [0,major], 0:13] = mat[:, [major,0], 0:13]
+
+#     mat = np.transpose(mat, (0,2,1))
+#     cards = mat.flatten()
+#     # 获取指定索引的元素
+#     selected_cards = list(cards[0:52]) + [cards[52], cards[56]] + list(cards[60+0:60+52]) + [cards[60+52], cards[60+56]]
+#     # 获取selected_cards中值为1的索引
+#     indices = np.where(np.array(selected_cards) == 1)[0]
+#     return indices
 
 # card2mst = cards2matrix([66, 3, 56, 76, 40, 33, 48, 80, 52,53, 107,5], '2', 'c')
 # mst2card = matrix2cards(card2mst,  '2', 'c')
@@ -361,7 +375,11 @@ def _cards2tensor(list_cards):
     return matrix
 
 
-
+if __name__ == '__main__':
+    # (0-h1 1-d1 2-s1 3-c1) (4-h2 5-d2 6-s2 7-c2) ... 52-joker 53-Joker (54-h1 55-d1 56-s1 57-c1) ... 106-joker 107-Joker
+    list_cards = [0,4,16,17,18,19,52,53]
+    for c in [0,4,16,17,18,19,52,53]:list_cards.append(c+54)        
+    cards2matrix(list_cards)
 
 
 
@@ -372,6 +390,7 @@ __all__ = [
     '__POINT__',
     "__PLAYER_COUNT__",
     "__CARDS_NUM__",
+    '__MAX_SCORE__',
     "__HAND_CARD_NUM__",
     "cards2matrix",
     "get_one_hot_array",

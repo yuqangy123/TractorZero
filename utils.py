@@ -21,8 +21,8 @@ __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花
 __MAJOR__ = ['jo', 'Jo']#小王 大王
 __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
 __CARDSCALE_COUNT__ = 14 #点数
-__PLAYER_COUNT__ = 4
-__CARDS_NUM__ = (54*2)
+__PLAYER_COUNT__ = 3
+__CARDS_NUM__ = (108)
 
 #牌类型
 __SINGLE__ = 0

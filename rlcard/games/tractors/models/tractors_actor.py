@@ -39,11 +39,11 @@ class TractorsActor():
     #         snatched 反主的玩家位置
     #     '''
     #     hold_card = deal_card+hold_card
-    #     hold_card = cards2matrix(hold_card, level, major)
+    #     hold_card = cards2matrix(hold_card)
     #     left_num = 25 - sum(hold_card)
         
 
-    #     bid_card = cards2matrix(bid_card, level, major)
+    #     bid_card = cards2matrix(bid_card)
 
     #     #友方的牌
     #     partner_called = []
@@ -56,11 +56,11 @@ class TractorsActor():
     #     pre = self.__models.bidding(hold_card, bid_card, left_num)
     #     return pre > 0.5
 
-    # def coverCard(self, public_card, hold_card, own_seat, bid_history, level, major):
+    # def coverCard(self, public_card, hold_card, own_seat, bid_history):
     #     hold_cards = public_card+hold_card
-    #     hold_cards_mat = cards2matrix(hold_cards, level, major)
+    #     hold_cards_mat = cards2matrix(hold_cards)
 
-    #     score_cards = cards2matrix([16,17,18,19,36,37,38,39,48,49,50,51,70,71,72,73,90,91,92,93,102,103,104,105], level, major)#分數牌
+    #     score_cards = cards2matrix([16,17,18,19,36,37,38,39,48,49,50,51,70,71,72,73,90,91,92,93,102,103,104,105])#分數牌
         
     #     partner_called, rival_called = [],[]
     #     for bid_pro in bid_history:
@@ -70,8 +70,8 @@ class TractorsActor():
     #             else:
     #                 rival_called = bid_pro[1]
                 
-    #     partner_called_mat = cards2matrix(partner_called, level, major)
-    #     rival_called_mat = cards2matrix(rival_called, level, major)
+    #     partner_called_mat = cards2matrix(partner_called)
+    #     rival_called_mat = cards2matrix(rival_called)
         
     #     cover_card = self.__models.cover(hold_cards_mat, partner_called_mat, rival_called_mat, hold_cards)
     #     cover_card = matrix2cards(cover_card)

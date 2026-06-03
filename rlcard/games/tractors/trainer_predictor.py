@@ -13,7 +13,7 @@ import traceback
 from rlcard.utils.file_writer import FileWriter
 
 from rlcard.games.tractors.models import tractorActor
-from .env.tractors_env import run
+from .env.tractors_env import act
 from ctypes import c_int, c_float, c_double, c_bool
 from rlcard.games.tractors import learner_predictor_model_houqi
 
@@ -193,7 +193,7 @@ def train(flags):
         num_actors = flags.num_actors
         for i in range(flags.num_actors):
             actor_pro = ctx.Process(
-                target=run,
+                target=act,
                 args=(i, device, actors[device], free_queue[device], full_queue[device], belief_buffer[device], flags))
             actor_pro.start()
             actor_processes.append(actor_pro)
