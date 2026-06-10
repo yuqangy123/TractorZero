@@ -23,7 +23,7 @@ __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
 __PLAYER_COUNT__ = 3
 __CARDS_NUM__ = (108)
 
-__HAND_CARD_NUM__ = 25#手牌数量
+__HAND_CARD_NUM__ = 28#手牌数量
 
 __MAX_SCORE__ = 40#最多分数，1个代表5分
 
@@ -400,4 +400,5 @@ __all__ = [
     '__PAIR__',
     '__TRACTOR__' ,
     '__SUSPECT__',
+    '__HAND_CARD_NUM__',
 ]

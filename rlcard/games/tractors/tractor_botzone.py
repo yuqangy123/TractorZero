@@ -40,6 +40,7 @@ class tractorGame():
         self.errored = [[] for _ in range(__PLAYER_COUNT__)]
         self.Major = __MAJOR__.copy()
         self.get_score = 0 # 闲家得分，每次step前清空一下该值
+        self.get_public_score = 0 # 底牌得分
         self.get_score_pok=[]# 得分牌，每次step前清空一下该值
         self.globalInfo = {} # 未确定主花色前为空
         
@@ -433,11 +434,11 @@ class tractorGame():
             random.shuffle(allo)
             allocation = []
             for i in range(__PLAYER_COUNT__):
-                allocation.append(allo[i*28:(i+1)*28])
+                allocation.append(allo[i*__HAND_CARD_NUM__:(i+1)*__HAND_CARD_NUM__])
         if "publiccard" in full_input["initdata"]:
             publiccard = full_input["initdata"]["publiccard"]
         else:
-            publiccard = allo[__PLAYER_COUNT__*28:__PLAYER_COUNT__*28 + 8]
+            publiccard = allo[__PLAYER_COUNT__*__HAND_CARD_NUM__:__PLAYER_COUNT__*__HAND_CARD_NUM__ + 8]
         
         return full_input, seedRandom, allocation, publiccard
 
@@ -1112,13 +1113,17 @@ class tractorGame():
 
 
     def Reward(self, score, currplayer, banker):
-        if (currplayer - banker) % 2 != 0: # 非庄家得分
+        if currplayer != banker: # 非庄家得分
+            self.get_score += score
+            
+    def RewardPublic(self, score, currplayer, banker):
+        if currplayer != banker: # 非庄家得分
             self.get_score += score
 
     # return endingScores(dict)
     def EndGame(self, banker, score):
         endingScores = {}
-        bankers = [banker, (banker + 2) % __PLAYER_COUNT__]
+        bankers = [banker]
         up_level_step = 1#晋升的级数
         banker_win = score < 80
         if score <= 0: # 大光，庄家得3分
@@ -1299,7 +1304,9 @@ class tractorGame():
     #获取当前权位玩家位置
     def getPlayerPosition(self):
         return self.globalInfo["playerpos"]
-    
+    #获取玩家剩余手牌数量
+    def getPlayerLeftHandCards(self, pos):
+        return len(self.player_hand_cards[pos][:])
     #获取上一轮出牌历史
     def getLastRoundPlayHistory(self):
         return self.globalInfo["history"][0]
@@ -1312,6 +1319,7 @@ class tractorGame():
     #获取当前轮的首出牌人位置
     def getCurrRoundPlaySeat(self):
         return self.globalInfo["history"][3]
+    
     
 
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机；可选单牌）
@@ -1979,6 +1987,7 @@ class tractorGame():
     # global里包含了主花色、级牌、庄家（覆盖）、报主情况
     def step(self, response=None):
         self.get_score = 0
+        self.get_public_score = 0
         self.get_score_pok = []
         self.erro_code = 0
         self.step_count += 1
