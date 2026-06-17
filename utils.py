@@ -23,6 +23,7 @@ __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
 __CARDSCALE_COUNT__ = 14 #点数
 __PLAYER_COUNT__ = 3
 __CARDS_NUM__ = (108)
+__HAND_CARD_NUM__ = 28#手牌数量
 
 #牌类型
 __SINGLE__ = 0
@@ -297,4 +298,5 @@ __all__ = [
     '__PAIR__',
     '__TRACTOR__' ,
     '__SUSPECT__',
+    '__HAND_CARD_NUM__',
 ]
