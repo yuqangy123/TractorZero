@@ -659,6 +659,23 @@ def act(i, device, actor, batch_queues, buffers, flags):
                                 "reward_buf": torch.stack([ndarr.clone().detach() for ndarr in reward_buf[role][:T]]),
                             })
                             hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
+                            hand_cards_buf[role] = hand_cards_buf[role][T:]
                             
                             
                             episode_return_buf[p] = episode_return_buf[p][T:]
