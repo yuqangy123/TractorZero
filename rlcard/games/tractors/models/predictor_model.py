@@ -5,7 +5,7 @@ import numpy as np
 import torch.optim as optim
 import torch.nn.functional as F
 # from rlcard.games.tractors.models.common_model import PlayerEncoder
-from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
+from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
 torch.autograd.set_detect_anomaly(True)  # 启用异常检测
 
 # ---------------------------

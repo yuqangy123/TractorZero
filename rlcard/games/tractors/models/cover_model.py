@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import numpy as np
-from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
+from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
 from torch.distributions import Categorical
 
 #埋牌模型

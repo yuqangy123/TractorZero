@@ -1,6 +1,6 @@
 import torch as t
 import torch.nn as nn
-from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
+from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
 
 #玩家出牌信息编码器
 class PlayerEncoder(nn.Module):

@@ -9,7 +9,7 @@ import scipy.signal
 import gym
 import os
 import datetime
-from rlcard.games.tractors.models.stractor_resnet import ResNet, ResidualBlock
+from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
 # from rlcard.games.tractors.models.common_model import PlayerEncoder
 
 # Add Transformer components
@@ -235,6 +235,7 @@ class AttentionLayer(nn.Module):
 class PlayModel(nn.Module):
     def __init__(self, device):
         super().__init__()
+        self._device = device
         self.num_opps = 4
         self.action_type_num = 4#动作类型维度
         self.card_shape = (2, 4, 15)
@@ -242,20 +243,50 @@ class PlayModel(nn.Module):
 
         # 手牌特征提取器 (2,4,15) -> (hidden_channels,2,4,5) 
         ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
-        self.card_encoder = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
+        self.cards_encoder = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
 
-        #历史出牌时序特征, 接着 card_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
+        
+        #历史出牌时序特征, 接着 cards_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
         self.lstm = nn.LSTM(hidden_dim+4, hidden_dim, batch_first=True)
         self.attention_play = AttentionLayer( hidden_dim+4)
         self.attention_bid = AttentionLayer( hidden_dim+4)
         self.attention_round = AttentionLayer( hidden_dim+4)
 
-        #牌型决策层模型， 输出4种牌型概率
-        self.actionTypeModel = PPOClip(3620, 0, self.action_type_num, device=device)
-        #具体出牌层模型，输出牌型中每个具体牌的回归值
-        self.actionCardModel = PPOClip(3620, self.action_type_num, 1, device=device)
-        #垫牌模层模型，输出需要垫的牌矩阵
-        self.actionDiscardModel = PPOClip(3620, self.action_type_num+2*4*15, 2*4*15, device=device)
+        #上层策略网络
+        self.strategy_net = nn.Sequential(
+            nn.Linear(512, 512, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(512, 256, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(256, 7, bias=False),
+            nn.Sigmoid()
+        )
+        #下层出牌牌型网络
+        self.action_type_net = nn.Sequential(
+            nn.Linear(512, 512, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(512, 256, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(256, 4, bias=False),
+            nn.Sigmoid()
+        )
+        #下层出牌Q值网络
+        self.action_q_net = nn.Sequential(
+            nn.Linear(512, 512, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(512, 256, bias=False),
+            nn.LeakyReLU(inplace=True),
+            nn.Linear(256, 1, bias=False),
+            nn.Sigmoid()
+        )
+        
+        
+        # #牌型决策层模型， 输出4种牌型概率
+        # self.actionTypeModel = PPOClip(3620, 0, self.action_type_num, device=device)
+        # #具体出牌层模型，输出牌型中每个具体牌的回归值
+        # self.actionCardModel = PPOClip(3620, self.action_type_num, 1, device=device)
+        # #垫牌模层模型，输出需要垫的牌矩阵
+        # self.actionDiscardModel = PPOClip(3620, self.action_type_num+2*4*15, 2*4*15, device=device)
 
     def __is_tractor_batch(self, cnt):
         # cnt: [B,4,15]
@@ -296,7 +327,34 @@ class PlayModel(nn.Module):
 
         return cond_one_suit & cond_all_pairs & cond_min_len & cond_continuous
 
-    def forward(self, state_feat, isTrain = None):
+    def forward(self, obs, play_action_seq, legal_actions):
+        cards_feat = self.cards_encoder(obs)
+        
+        play_seq_feat = self.cards_encoder(play_action_seq)
+        h_play, (_, _) = self.lstm(play_seq_feat)
+        # 使用注意力机制替代直接取最后一个时间步
+        h_play_att = self.attention_play(play_seq_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
+        h_play += h_play_att
+        
+        pub_x = t.cat([cards_feat, h_play], dim=0)
+        
+        strategy_logits = self.strategy_net(pub_x)
+        best_s = t.argmax(strategy_logits, dim=1)
+        strategy_feat = t.zeros((7,), device=self._device, dtype=t.float32)
+        strategy_feat[best_s] = 1.
+        
+        input_ty = t.cat([pub_x, strategy_feat], dim=0)
+        action_type_logits = self.action_type_net(input_ty)
+        best_t = t.argmax(action_type_logits, dim=1)
+        
+        actions_batch = t.tensor(legal_actions[best_t], dtype=t.float32, device=self._device)
+        pub_x_batch = np.repeat( pub_x[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
+        strategy_feat_batch = np.repeat( strategy_feat[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
+        z_batch = np.concatenate((actions_batch, pub_x_batch, strategy_feat_batch), axis=1)
+        act_logits = self.action_q_net(z_batch)
+        
+        return dict(value=act_logits, strategy=best_s)
+    def forward1(self, state_feat, isTrain = None):
         B = state_feat['history_play_seat'].shape[0]#批次
         play_card_history_feat = state_feat['history_play_card']#历史出牌
         play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号

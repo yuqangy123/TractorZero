@@ -6,7 +6,7 @@ from rlcard.games.tractors.utils import *
 import logging, random
 import traceback
 from rlcard.envs import Env
-from rlcard.games.tractors.tractor_botzone import tractorGame as tractors
+from rlcard.games.tractors.env.botzone import tractorGame as tractors
 import copy
 import os, math
 os.environ['PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT'] = '5.0'#设置环境变量增加超时时间
@@ -25,7 +25,7 @@ class TractorsEnv(tractors):
     ''' tractor Environment
     '''
 
-    def __init__(self, config):
+    def __init__(self, flags):
         # from rlcard.games.doudizhu.utils import ACTION_2_ID, ID_2_ACTION
         # from rlcard.games.doudizhu.utils import cards2str, cards2str_with_suit
         
@@ -34,6 +34,7 @@ class TractorsEnv(tractors):
         # self._ACTION_2_ID = ACTION_2_ID
         # self._ID_2_ACTION = ID_2_ACTION
         super().__init__()
+        
         # self.game = tractors()
         # self.state_shape = [[790], [901], [901]]
         # self.action_shape = [[54] for _ in range(self.num_players)]
@@ -340,7 +341,7 @@ def act(i, device, actor, batch_queues, buffers, flags):
                     # if len(ret) > 0:
                     #     bid_trajectory.append(response)
                     
-                #埋牌阶段
+                #埋牌阶段(无埋牌阶段)
                 elif stage == "cover":
                     # cover_seat = response[0]
                     # cover_cards = response[1]
