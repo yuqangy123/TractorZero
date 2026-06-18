@@ -204,7 +204,7 @@ def get_obs(infoset):
     
     return obs
 
-def act(i, device, actor, batch_queues, buffers, flags):
+def step(i, device, actor, batch_queues, buffers, flags):
     """
     This function will run forever until we stop it. It will generate
     data from the environment and send the data to buffer. It uses
