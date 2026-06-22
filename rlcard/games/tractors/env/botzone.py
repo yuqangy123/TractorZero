@@ -1235,7 +1235,7 @@ class tractorGame():
         return endingScores
 
     #获取玩家手牌
-    def getPlayerHoldCards(self, pos):
+    def getPlayerHandCards(self, pos):
         if pos >= len(self.player_hand_cards):
             pass
         return self.player_hand_cards[pos][:]
@@ -1320,7 +1320,10 @@ class tractorGame():
     #获取当前轮的首出牌人位置
     def getCurrRoundPlaySeat(self):
         return self.globalInfo["history"][3]
-    
+    #获取最后一次的叫分
+    def getLeastBidScore(self):
+        return self.globalInfo["bid_seq"][-1][1]
+        #self.globalInfo["bid_seq"].append([bid_seat, bid_score])
     
 
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机；可选单牌）
@@ -2051,14 +2054,14 @@ class tractorGame():
                 
                 
                 
-            elif self.globalInfo["stage"] == "deal":
-                pass
+            # elif self.globalInfo["stage"] == "deal":
+            #     pass
             
             #叫分
             elif self.globalInfo["stage"] == "bid":
                 bid_seat = response[0]
                 bid_score = response[1]
-                self.globalInfo["bid_seq"].append([bid_seat, bid_score])                
+                self.globalInfo["bid_seq"].append([bid_seat, bid_score])
                 if 3 <= len(self.globalInfo['bid_seq']):
                     bid_win = 0
                     if self.globalInfo['bid_seq'][-1][1] == 0 and self.globalInfo['bid_seq'][-2][1] == 0: bid_win = -3
@@ -2230,16 +2233,16 @@ def run_random(env):
         called = env.getCalled()
         snatched = env.getSnatched()
         
-        hold = env.getPlayerHoldCards(play_pos)
+        hold = env.getPlayerHandCards(play_pos)
         response = [play_pos, env.call_Snatch(get_card, hold, called, snatched, level)]
     elif stage == "cover":
         publiccard = env.getPublicCards()
-        hold = env.getPlayerHoldCards(env.getBanker())
+        hold = env.getPlayerHandCards(env.getBanker())
         # response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
         response = [env.getBanker(), env.cover_PubEx(publiccard, hold, level)]
     elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
-        hold = env.getPlayerHoldCards(play_pos)
+        hold = env.getPlayerHandCards(play_pos)
         
         
         playedCards = env.getLegalPlayCard(history_curr, hold, level)
@@ -2420,17 +2423,17 @@ def run(env):
         get_card = env.getDeliver()[0]
         called = env.getCalled()
         snatched = env.getSnatched()
-        hold = env.getPlayerHoldCards(play_pos)
+        hold = env.getPlayerHandCards(play_pos)
         response = bot.call_snatch(get_card, hold, called, snatched, level)
         return [play_pos, response]
     elif stage == "cover":
         publiccard = env.getPublicCards()
-        hold = env.getPlayerHoldCards(env.getBanker())
+        hold = env.getPlayerHandCards(env.getBanker())
         response = bot.cover_pub(publiccard, hold, level)
         return [env.getBanker(), response]
     elif stage == "play":
         history = env.getCurrRoundPlayHistory()
-        hold = env.getPlayerHoldCards(play_pos)
+        hold = env.getPlayerHandCards(play_pos)
         response = bot.play_card(history, hold, level)
         return [play_pos, response]
     else:

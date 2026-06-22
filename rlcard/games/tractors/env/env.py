@@ -32,38 +32,31 @@ class Env:
     def reset(self, model, device, flags=None):
         self._env.reset()
 
-        # Randomly shuffle the deck
-        _deck = deck.copy()
-        rng = np.random.default_rng()
-        rng.shuffle(_deck)
-        card_play_data = {'first': _deck[:17],
-                          'second': _deck[20:37],
-                          'third': _deck[37:],
-                          'three_landlord_cards': _deck[17:20]
-                          }
-        for key in card_play_data:
-            card_play_data[key].sort()
-        # 重置叫牌
-        self._env.bid_init(card_play_data)
-
-        bid_over = self._bid_over
         self.infoset = self._bid_infoset
-        return get_obs(self.infoset, bid_over)
+        return get_obs(self.infoset, self._stage)
 
     def step(self, action):
-        if not self._draw:
-            if self._bid_over:
-                pos = self._acting_player_position
-            else:
-                pos = self._bidding_player_position
+        if self._bid_over:
+            if self._cover_over:
+               pos = self._acting_player_position
+            else:    
+                pos = self._coving_player_position
+        else:
+            pos = self._bidding_player_position
 
-            self.players[pos].set_action(action)
-            self._env.step()
-        if not self._draw:
-            if self._bid_over:
-                self.infoset = self._game_infoset
-            else:
-                self.infoset = self._bid_infoset
+        
+        self.players[pos].set_action(action)
+        
+        self._env.step()
+            
+        if self._bid_over:
+            if self._cover_over:
+               self.infoset = self._game_infoset
+            else:    
+                self.infoset = self._cover_infoset
+        else:
+            self.infoset = self._bid_infoset
+            
 
         done = False
         reward = 0.0
@@ -83,7 +76,7 @@ class Env:
         elif self._draw:
             obs = None
         else:
-            obs = get_obs(self.infoset, self._bid_over)
+            obs = get_obs(self.infoset, self._stage)
         return obs, reward, done, self._draw, {}
 
     def _get_reward(self, pos):
@@ -141,12 +134,15 @@ class Env:
     @property
     def _bid_infoset(self):
         return self._env.bid_infoset
+    
+    @property
+    def _cover_infoset(self):
+        return self._env.cover_infoset
 
     @property
-    def _game_bomb_num(self):
-        return self._env.get_bomb_num()
-
-
+    def _coving_player_position(self):
+        return self._env.coving_player_position
+    
     @property
     def _acting_player_position(self):
         return self._env.acting_player_position
@@ -162,6 +158,14 @@ class Env:
     @property
     def _bid_over(self):
         return self._env.bid_over
+    
+    @property
+    def _cover_over(self):
+        return self._env.cover_over
+    
+    @property
+    def _stage(self):
+        return self._env.stage
 
     @property
     def _game_winner(self):
@@ -171,9 +175,6 @@ class Env:
     def _bid_winner(self):
         return self._env.get_winner_bid()
 
-    @property
-    def _draw(self):
-        return self._env.draw
 
 
 class DummyAgent(object):
@@ -408,13 +409,13 @@ def _get_idler_obs_resnet(infoset):
 
 def _get_bid_obs_resnet(infoset):
     my_handcards = cards2matrix(infoset.player_hand_cards)
-    curr_bid_score = _get_one_hot_array(infoset.current_bid_score//5, 40)
+    curr_bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
     mask_bid_score = _get_one_hot_array(infoset.mask_bid_score//5, 40)
     
     legal_actions = _get_one_hot_array(infoset.mask_bid_score//5, 40)
     
     z = np.hstack((
-                    my_handcards,    
+                    my_handcards,
                     curr_bid_score,
                     mask_bid_score,
                 ))
@@ -427,11 +428,8 @@ def _get_bid_obs_resnet(infoset):
     return obs
 
 def _get_cover_obs_resnet(infoset):
-    major = infoset.major
-    level = infoset.level
     bid_score = infoset.bid_score
-    
-    my_handcards = cards2matrix(infoset.player_hand_cards, level=level, major=major)
+    my_handcards = cards2matrix(infoset.player_hand_cards)
     
 
     #分数归一化
