@@ -2,7 +2,7 @@ from collections import Counter, OrderedDict, deque
 import numpy as np
 import torch
 from itertools import chain
-from rlcard.games.tractors.utils import *
+from rlcard.games.tractors.env.utils import *
 import logging, random
 import traceback
 from rlcard.envs import Env
@@ -21,7 +21,7 @@ log.propagate = False
 log.addHandler(shandle)
 log.setLevel(logging.INFO)
 
-class TractorsEnv(tractors):
+class GameEnv(tractors):
     ''' tractor Environment
     '''
 

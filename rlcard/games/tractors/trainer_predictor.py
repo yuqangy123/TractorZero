@@ -13,7 +13,7 @@ import traceback
 from rlcard.utils.file_writer import FileWriter
 
 from rlcard.games.tractors.models import tractorActor
-from .env.tractors_env import act
+from .env.game import act
 from ctypes import c_int, c_float, c_double, c_bool
 from rlcard.games.tractors import learner_predictor_model_houqi
 

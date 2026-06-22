@@ -431,7 +431,8 @@ class tractorGame():
         else: # 产生大家各自有什么牌
             '''每局使用两副牌（去掉三和四），每人分得28张手牌，剩余8张为底牌，共92张牌，组队需凑齐3人。'''
             allo = [i for i in range(8)] + [i for i in range(16, 54)] + [i for i in range(54+8)] + [i for i in range(54+16, 54+54)]
-            random.shuffle(allo)
+            rng = np.random.default_rng()
+            rng.shuffle(allo)
             allocation = []
             for i in range(__PLAYER_COUNT__):
                 allocation.append(allo[i*__HAND_CARD_NUM__:(i+1)*__HAND_CARD_NUM__])

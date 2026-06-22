@@ -8,7 +8,7 @@ import time
 
 import torch 
 
-#tractor_botzone引用的是这个
+
 ###############################################################
 # 牌面表示：数字
 # h:红桃 d:方片 s:黑桃 c:草花 
@@ -20,10 +20,12 @@ __CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
 __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
 __MAJOR__ = ['jo', 'Jo']#小王 大王
 __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
-__CARDSCALE_COUNT__ = 14 #点数
 __PLAYER_COUNT__ = 3
 __CARDS_NUM__ = (108)
+
 __HAND_CARD_NUM__ = 28#手牌数量
+
+__MAX_SCORE__ = 40#最多分数，1个代表5分
 
 #牌类型
 __SINGLE__ = 0
@@ -32,7 +34,7 @@ __TRACTOR__ = 2
 __SUSPECT__ = 3
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
-               11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
+               11: 8, 12: 9, 13: 10, 15: 11, 17: 12}
 
 NumOnes2Array = {0: np.array([0, 0, 0, 0]),
                  1: np.array([1, 0, 0, 0]),
@@ -53,6 +55,7 @@ log.setLevel(logging.INFO)
 # Buffers are used to transfer data between actor processes
 # and learner processes. They are shared tensors in GPU
 Buffers = typing.Dict[str, typing.List[torch.Tensor]]
+
 
 
 def get_batch(free_queue,
@@ -200,35 +203,136 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
         print()
         raise e
 
-def _cards2array(list_cards):
+# level=11
+# major=3
+# matrix = np.arange(2*15*4, dtype=np.int8)
+# matrix = matrix.reshape(2, 4, 15)
+# matrix_cp = matrix.copy()
+# print(matrix)
+# view = matrix[:,:,level:-1]
+# view[:]=np.roll(view, shift=-1, axis=2)
+# print(matrix)
+# matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+# print(matrix)
+# view = matrix[:,:,level:-1]
+# view[:]=np.roll(view, shift=1, axis=2)
+# print(matrix)
+# matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+# print(matrix)
+# print(matrix == matrix_cp)
+#扑克牌(number)转矩阵
+def cards2matrix(list_cards, level='2', major='s'):
     """
-    A utility function that transforms the actions, i.e.,
-    A list of integers into card matrix. Here we remove
-    the six entries that are always zero and flatten the
-    the representations.
+        '3','4','5','6','7','8','9','10','J','Q','K','A','2','o','O'
+    s    0   0   0   0   0   0   0   0   0   0   0   0   0   1   1
+    h    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    c    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    d    0   0   0   0   0   0   0   0   0   0   0   0   0   0   0
+    [2, 4, 15]
+    kernel为2*2 更关注对子, 游戏中没有3和4
+
+
+           s   h   c   d
+    '3'    0   0   0   0
+    '4'    0   0   0   0
+    '5'    0   0   0   0
+    '6'    0   0   0   0
+    '7'    0   0   0   0
+    '8'    0   0   0   0
+    '9'    0   0   0   0
+    '10'   0   0   0   0
+    'J'    0   0   0   0
+    'Q'    0   0   0   0
+    'K'    0   0   0   0
+    'A'    0   0   0   0
+    '2'    0   0   0   0
+    'o'    1   0   0   0
+    'O'    1   0   0   0
+    [2, 15, 4] 
     """
-    if len(list_cards) == 0:
-        return np.zeros(54, dtype=np.int8)
+    matrix = np.zeros(54*2, dtype=np.int8)
+    matrix[list_cards] = 1
+    matrix = np.insert(matrix, 53, [0,0,0])
+    matrix = np.insert(matrix, 57, [0,0,0])
+    matrix = np.insert(matrix, 60+53, [0,0,0])
+    matrix = np.insert(matrix, 60+57, [0,0,0])
+    matrix = matrix.reshape(2,15,4)
+    matrix = np.transpose(matrix, (0,2,1))
+    
+    #环境的牌值是从A-K，o，O，将A和2放o前面，方便卷积提取牌型特征，
+    new_order = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 1, 13, 14]
+    
+    # # 根据级数调整列顺序数组
+    # # new_order = list(range(matrix.shape[2]))
+    level = __CARDSCALE__.index(level)
+    if level != 1:
+        if level == 0:
+            new_order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 13, 14]
+        else:
+            new_order = range(1, 15)
+            new_order.insert(-3, 0)  # 在12后面插入
+            del new_order[level]
+            new_order.insert(-2, level)  # 插入级牌
+            
+        # view = matrix[:,:,level:-2]
+        # view[:]=np.roll(view, shift=-1, axis=2)
+    matrix = matrix[:, :, new_order]
 
-    matrix = np.zeros([4, 13], dtype=np.int8)
-    jokers = np.zeros(2, dtype=np.int8)
-    counter = Counter(list_cards)
-    for card, num_times in counter.items():
-        if card < 20:
-            matrix[:, Card2Column[card]] = NumOnes2Array[num_times]
-        elif card == 20:
-            jokers[0] = 1
-        elif card == 30:
-            jokers[1] = 1
-    return np.concatenate((matrix.flatten('F'), jokers))
+    # # 根据主花色调整行序列数组
+    major = __SUITSET__.index(major)
+    if major != 0:
+        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+    return matrix
 
 
-def _get_one_hot_array(num_left_cards, max_num_cards):
+def matrix2cards(matrix, level='2', major='s'):
+    #转换花色
+    major = __SUITSET__.index(major)
+    if major != 0:
+        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+    
+    #转换级牌
+    new_order = [11, 12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
+    level = __CARDSCALE__.index(level)
+    if level != 1:
+        if level == 0:
+            new_order = [12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]
+        else:
+            new_order = [11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
+            new_order.insert(level+1, 12)
+        # view = mat[:,:,level:-2]
+        # view[:]=np.roll(view, shift=1, axis=2)
+    matrix = matrix[:, :, new_order]
+    
+
+    matrix = np.transpose(matrix, (0,2,1))
+    cards = matrix.flatten()
+    # 获取指定索引的元素
+    selected_cards = list(cards[0:52]) + [cards[52], cards[56]] + list(cards[60+0:60+52]) + [cards[60+52], cards[60+56]]
+    # 获取selected_cards中值为1的索引
+    indices = np.where(np.array(selected_cards) == 1)[0]
+    return indices
+
+# card2mst = cards2matrix([66, 3, 56, 76, 40, 33, 48, 80, 52,53, 107,5], '2', 'c')
+# mst2card = matrix2cards(card2mst,  '2', 'c')
+# print(mst2card)
+def get_one_hot_array(num_left_cards, max_num_cards):
     """
     A utility function to obtain one-hot endoding
     """
     one_hot = np.zeros(max_num_cards)
-    one_hot[num_left_cards - 1] = 1
+    if num_left_cards>0 and num_left_cards<=max_num_cards:
+        one_hot[num_left_cards - 1] = 1
+
+    return one_hot
+
+def get_full_hot_array(num_left_cards, max_num_cards):
+    """
+    A utility function to obtain one-hot endoding
+    """
+    one_hot = np.zeros(max_num_cards)
+    if num_left_cards>0 and num_left_cards<=max_num_cards:
+        one_hot[:num_left_cards] = 1
 
     return one_hot
 
@@ -283,7 +387,11 @@ def _cards2tensor(list_cards):
     return matrix
 
 
-
+if __name__ == '__main__':
+    # (0-h1 1-d1 2-s1 3-c1) (4-h2 5-d2 6-s2 7-c2) ... 52-joker 53-Joker (54-h1 55-d1 56-s1 57-c1) ... 106-joker 107-Joker
+    list_cards = [0,4,16,17,18,19,52,53]
+    for c in [0,4,16,17,18,19,52,53]:list_cards.append(c+54)        
+    cards2matrix(list_cards)
 
 
 
@@ -294,6 +402,12 @@ __all__ = [
     '__POINT__',
     "__PLAYER_COUNT__",
     "__CARDS_NUM__",
+    '__MAX_SCORE__',
+    "__HAND_CARD_NUM__",
+    "cards2matrix",
+    "get_one_hot_array",
+    "get_full_hot_array",
+    "matrix2cards",
     '__SINGLE__',
     '__PAIR__',
     '__TRACTOR__' ,
