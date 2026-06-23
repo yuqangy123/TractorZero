@@ -15,15 +15,16 @@ def _format_observation(obs, device):
     if not device == "cpu":
         device = 'cuda:' + str(device)
     device = torch.device(device)
-    x_batch = torch.from_numpy(obs['x_batch']).to(device)
-    z_batch = torch.from_numpy(obs['z_batch']).to(device)
-    x_no_action = torch.from_numpy(obs['x_no_action'])
-    z = torch.from_numpy(obs['z'])
-    obs = {'x_batch': x_batch,
-           'z_batch': z_batch,
-           'legal_actions': obs['legal_actions'],
+    
+    z = torch.from_numpy(obs['z']).to(device)
+    x_no_action = torch.from_numpy(obs['x_no_action']).to(device)
+    legal_actions = torch.from_numpy(obs['legal_actions'])
+    
+    obs = {
+           'z': z,
+           'x': x_no_action,
            }
-    return position, obs, x_no_action, z
+    return position, obs, legal_actions
 
 class Environment:
     def __init__(self, env, device):
@@ -35,54 +36,37 @@ class Environment:
 
     def initial(self, model, device, flags=None):
         obs = self.env.reset(model, device, flags=flags)
-        initial_position, initial_obs, x_no_action, z = _format_observation(obs, self.device)
-        initial_reward = torch.zeros(1, 1)
+        initial_position, initial_obs, legal_actions = _format_observation(obs, self.device)
+        
         self.episode_return = torch.zeros(1, 1)
-        initial_done = torch.ones(1, 1, dtype=torch.bool)
+        
+        # initial_done = torch.ones(1, 1, dtype=torch.bool)
         return initial_position, initial_obs, dict(
-            done=initial_done,
+            done=False,
+            legal_actions=legal_actions,
             episode_return=self.episode_return,
-            obs_x_no_action=x_no_action,
-            obs_z=z,
-            game_infoset = self.env._bid_infoset
         )
 
     def step(self, action, model, device, flags=None):
-        obs, reward, done, draw, _ = self.env.step(action)
+        obs, reward, done, = self.env.step(action)
 
         self.episode_return = reward
         episode_return = self.episode_return
-        buf = None
+        
         if done:
             obs = self.env.reset(model, device, flags=flags)
             self.episode_return = torch.zeros(1, 1)
-        if draw:
-            obs = self.env.reset(model, device, flags=flags)
-            self.episode_return = torch.zeros(1, 1)
-        position, obs, x_no_action, z = _format_observation(obs, self.device)
+        
+        position, obs, legal_actions = _format_observation(obs, self.device)
         # reward = torch.tensor(reward).view(1, 1)
         done = torch.tensor(done).view(1, 1)
-        draw = torch.tensor(draw).view(1, 1)
 
-        if buf is None:
-            return position, obs, dict(
-                draw=draw,
-                done=done,
-                episode_return=episode_return,
-                obs_x_no_action=x_no_action,
-                obs_z=z,
-                game_infoset = self.env._game_infoset or self.env._bid_infoset
-            )
-        else:
-            return position, obs, dict(
-                draw=draw,
-                done=done,
-                episode_return=episode_return,
-                obs_x_no_action=x_no_action,
-                obs_z=z,
-                begin_buf=buf,
-                game_infoset = self.env._game_infoset or self.env._bid_infoset
-            )
+        return position, obs, dict(
+            done=done,
+            legal_actions=legal_actions,
+            episode_return=episode_return,
+        )
+    
 
     def close(self):
         self.env.close()

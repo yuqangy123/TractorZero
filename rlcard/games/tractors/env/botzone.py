@@ -42,7 +42,7 @@ class tractorGame():
         self.get_score = 0 # 闲家得分，每次step前清空一下该值
         self.get_public_score = 0 # 底牌得分
         self.get_score_pok=[]# 得分牌，每次step前清空一下该值
-        self.globalInfo = {} # 未确定主花色前为空
+        self.globalInfo = {"stage":"gameend"} # 未确定主花色前为空
         
         self.step_count = -1 # 一局里面的步数, -1是未在对局中
         self.player_hand_cards = [[] for _ in range(__PLAYER_COUNT__)] # 每位玩家手牌
@@ -442,7 +442,63 @@ class tractorGame():
             publiccard = allo[__PLAYER_COUNT__*__HAND_CARD_NUM__:__PLAYER_COUNT__*__HAND_CARD_NUM__ + 8]
         
         return full_input, seedRandom, allocation, publiccard
-
+    
+    def reset(self):
+        # 刚开局
+        if self.globalInfo["stage"] == "gameend":
+            full_input, seedRandom, allocation, publiccard = self.initGame()
+            initdata = {}
+            initdata["allocation"] = allocation
+            initdata["seed"] = seedRandom
+            initdata["publiccard"] = publiccard
+            
+            if "first_round" not in self.globalInfo:
+                self.globalInfo["first_round"] = True
+                self.globalInfo["level"] = "2"
+            else:
+                self.globalInfo["first_round"] = False
+                
+                
+            
+            self.globalInfo["allocation"] = initdata["allocation"]
+            self.globalInfo["seed"] = initdata["seed"]
+            self.globalInfo["publiccard"] = initdata["publiccard"]
+            self.globalInfo['playedcard'] = []#已出牌
+            
+            
+            #初始化banking
+            if "banking" not in self.globalInfo: # 没有规定摸牌方
+                first = 0
+                banking = {
+                "called": [],
+                "major": "",
+                "banker": -1
+                } 
+            else:
+                first = self.globalInfo["banking"]["banker"]
+                # initdata["banker"] = first
+                banking = {
+                "called": [],
+                "major": "",
+                "banker": first
+                } 
+                
+            self.globalInfo["stage"] = "deal"
+            # self.globalInfo["deliver"] = [allocation[first][0]]#发的牌
+            self.globalInfo["banking"] = banking
+            self.globalInfo["playerpos"] = first
+            
+            #直接一次性发完牌
+            self.player_hand_cards = [hand_cards for hand_cards in allocation]
+            # self.player_hand_cards[first].append(allocation[first][0])
+            self.globalInfo["stage"] = "bid"
+            self.globalInfo["bid_seq"] = []
+            
+        elif self.globalInfo["stage"] == "finalend":
+            self.globalInfo["first_round"] = None
+            self.globalInfo["stage"] = "gameend"
+            self.reset()
+        
     ###############################################################
     # 报主和反主模块
     # 接收每回合发牌的报主和反主信息
@@ -1246,7 +1302,7 @@ class tractorGame():
     
     #获取当前主牌
     def getMajorCards(self):
-        return self.MajorCards
+        return self.MajorCards[:]
     
     #获取当前的庄家
     def getBanker(self):
@@ -1262,7 +1318,7 @@ class tractorGame():
     
     #获取当前发牌状态发的牌
     def getDeliver(self):
-        return self.globalInfo["deliver"]
+        return self.globalInfo["deliver"][:]
     
     #获取目前总得分
     def getTotalScore(self):
@@ -1279,6 +1335,9 @@ class tractorGame():
     def getLastRoundScorePoke(self):
         return self.get_score>0 and self.get_score_pok or []
     
+    #当局的分数
+    def getGameScore(self):
+        return self.globalInfo["game_score"]
     
     # 获取错误码
     def getErrorCode(self):
@@ -1300,14 +1359,14 @@ class tractorGame():
         
     #获取底牌
     def getPublicCards(self):
-        return self.globalInfo["publiccard"]
+        return self.globalInfo["publiccard"][:]
     
     #获取当前权位玩家位置
     def getPlayerPosition(self):
         return self.globalInfo["playerpos"]
     #获取玩家剩余手牌数量
     def getPlayerLeftHandCards(self, pos):
-        return len(self.player_hand_cards[pos][:])
+        return len(self.player_hand_cards[pos])
     #获取上一轮出牌历史
     def getLastRoundPlayHistory(self):
         return self.globalInfo["history"][0]
@@ -1316,9 +1375,12 @@ class tractorGame():
         return self.globalInfo["history"][2]
     #获取当前轮出牌历史
     def getCurrRoundPlayHistory(self):
-        return self.globalInfo["history"][1]
+        play_seq = []
+        for i in range(len(self.globalInfo["history"][1])):
+            play_seq.append(self.globalInfo["history"][1][i][:])
+        return play_seq
     #获取当前轮的首出牌人位置
-    def getCurrRoundPlaySeat(self):
+    def getFristPlaySeat(self):
         return self.globalInfo["history"][3]
     #获取最后一次的叫分
     def getLeastBidScore(self):
@@ -1996,69 +2058,12 @@ class tractorGame():
         self.erro_code = 0
         self.step_count += 1
         
-        try:
-            # 刚开局
-            if self.globalInfo["stage"] == "gameend":
-                full_input, seedRandom, allocation, publiccard = self.initGame()
-                initdata = {}
-                initdata["allocation"] = allocation
-                initdata["seed"] = seedRandom
-                initdata["publiccard"] = publiccard
-                
-                if "first_round" not in self.globalInfo:
-                    self.globalInfo["first_round"] = True
-                    self.globalInfo["level"] = "2"
-                else:
-                    self.globalInfo["first_round"] = False
-                    
-                    
-                
-                self.globalInfo["allocation"] = initdata["allocation"]
-                self.globalInfo["seed"] = initdata["seed"]
-                self.globalInfo["publiccard"] = initdata["publiccard"]
-                self.globalInfo['playedcard'] = []#已出牌
-                
-                
-                #第一轮有机会写入initdata
-                if "banking" not in self.globalInfo: # 没有规定摸牌方
-                    first = 0
-                    banking = {
-                    "called": [],
-                    "major": "",
-                    "banker": -1
-                    } # 初始化banking
-                else:
-                    first = self.globalInfo["banking"]["banker"]
-                    # initdata["banker"] = first
-                    banking = {
-                    "called": [],
-                    "major": "",
-                    "banker": first
-                    } # 初始化banking
-                    
-                self.globalInfo["stage"] = "deal"
-                # self.globalInfo["deliver"] = [allocation[first][0]]#发的牌
-                self.globalInfo["banking"] = banking
-                self.globalInfo["playerpos"] = first
-                
-                #直接一次性发完牌
-                self.player_hand_cards = [hand_cards for hand_cards in allocation]
-                # self.player_hand_cards[first].append(allocation[first][0])
-                self.globalInfo["stage"] = "bid"
-                self.globalInfo["bid_seq"] = []
-                
-            elif self.globalInfo["stage"] == "finalend":
-                self.globalInfo["first_round"] = None
-                self.globalInfo["stage"] = "gameend"
-                self.step()
-                
-                
-                
+        try: 
             # elif self.globalInfo["stage"] == "deal":
             #     pass
             
             #叫分
-            elif self.globalInfo["stage"] == "bid":
+            if self.globalInfo["stage"] == "bid":
                 bid_seat = response[0]
                 bid_score = response[1]
                 self.globalInfo["bid_seq"].append([bid_seat, bid_score])
@@ -2072,7 +2077,7 @@ class tractorGame():
                         self.globalInfo['bidsseat'] = self.globalInfo["playerpos"]
                         self.globalInfo['bidscore'] = self.globalInfo['bid_seq'][bid_win][1]
                         self.player_hand_cards.extend(self.globalInfo["publiccard"])
-                        self.globalInfo["stage"] == "cover"
+                        self.globalInfo["stage"] = "cover"
                         major_color = response[2]
                         newbanking = {'major': major_color, "banker": bid_seat}
                         self.globalInfo["banking"] = newbanking
@@ -2180,13 +2185,13 @@ class tractorGame():
                         self.Reward(publicscore*mult, winner, banker)
                         new_score = old_score + self.get_score
 
-                        self.EndGame(banker, new_score)
-                        
                         history[0] = old_history
                         history[1] = new_history
                         self.globalInfo["history"] = history
-                        self.globalInfo["playerpos"] = nextplayer
+                        self.globalInfo["playerpos"] = winner
                         self.globalInfo["stage"] = 'gameend'
+                        self.globalInfo["banking"]["banker"] = winner
+                        self.EndGame(banker, new_score)
                         return
 
 
@@ -2216,9 +2221,9 @@ class tractorGame():
     def isFinalEnd(self):
         return self.globalInfo["stage"] == 'finalend'
      
-    
-    def getPlayedCards(self):
-        return self.player_played_cards
+    #获取玩家的已出牌
+    def getPlayedCards(self, play_pos):
+        return self.player_played_cards[play_pos][:]
         
 
 __MAX_ACTION_NUM__ = 0

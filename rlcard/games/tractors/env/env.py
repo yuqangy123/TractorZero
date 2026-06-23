@@ -18,14 +18,8 @@ class Env:
     def __init__(self, objective):
         self.objective = objective
 
-        # Initialize players
-        # We use three dummy player for the target position
-        self.players = {}
-        for position in ['first', 'second', 'third', 'landlord', 'landlord_down', 'landlord_up']:
-            self.players[position] = DummyAgent(position)
-
         # Initialize the internal environment
-        self._env = GameEnv(self.players)
+        self._env = GameEnv()
         self.total_round = 0
         self.infoset = None
 
@@ -36,26 +30,17 @@ class Env:
         return get_obs(self.infoset, self._stage)
 
     def step(self, action):
-        if self._bid_over:
-            if self._cover_over:
-               pos = self._acting_player_position
-            else:    
-                pos = self._coving_player_position
-        else:
-            pos = self._bidding_player_position
+        # if self._bid_over:
+        #     if self._cover_over:
+        #        pos = self._acting_player_position
+        #     else:    
+        #         pos = self._coving_player_position
+        # else:
+        #     pos = self._bidding_player_position
 
-        
-        self.players[pos].set_action(action)
-        
-        self._env.step()
+        self._env.step(action)
             
-        if self._bid_over:
-            if self._cover_over:
-               self.infoset = self._game_infoset
-            else:    
-                self.infoset = self._cover_infoset
-        else:
-            self.infoset = self._bid_infoset
+        
             
 
         done = False
@@ -72,12 +57,19 @@ class Env:
                     "third": self._get_reward_bidding("third"),
                 }
             }
+            # self._env.reset()
             obs = None
-        elif self._draw:
-            obs = None
+            
         else:
+            if self._bid_over:
+                if self._cover_over:
+                    self.infoset = self._game_infoset
+                else:    
+                    self.infoset = self._cover_infoset
+            else:
+                self.infoset = self._bid_infoset
             obs = get_obs(self.infoset, self._stage)
-        return obs, reward, done, self._draw, {}
+        return obs, reward, done
 
     def _get_reward(self, pos):
         winner = self._game_winner
@@ -103,8 +95,6 @@ class Env:
             return -r * multiply / 24
 
     def _get_reward_bidding(self, pos):
-        if self._draw:
-            return 0
         winner = self._bid_winner
         bomb_num = self._game_bomb_num + 1 if self._env.spring else self._game_bomb_num
         bid_count = self._env.bid_count
@@ -250,10 +240,10 @@ def _get_banker_obs_resnet(infoset):
         infoset.num_cards_left['banker'], 28)
 
     banker_up_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left_dict['banker_up'], 28)
+        infoset.num_cards_left['banker_up'], 28)
 
     banker_down_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left_dict['banker_down'], 28)
+        infoset.num_cards_left['banker_down'], 28)
     num_cards_left = np.hstack((
                          banker_num_cards_left,
                          banker_up_num_cards_left,
@@ -346,10 +336,10 @@ def _get_idler_obs_resnet(infoset):
         infoset.num_cards_left['banker'], 28)
 
     banker_up_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left_dict['banker_up'], 28)
+        infoset.num_cards_left['banker_up'], 28)
 
     banker_down_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left_dict['banker_down'], 28)
+        infoset.num_cards_left['banker_down'], 28)
     num_cards_left = np.hstack((
                          banker_num_cards_left,
                          banker_up_num_cards_left,
