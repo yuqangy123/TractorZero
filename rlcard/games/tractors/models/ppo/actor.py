@@ -13,7 +13,7 @@ import gc
 import numpy as np
 import zmq
 from pathlib import Path
-from model import MLPActorCritic, MLPQNetwork
+from rlcard.games.tractors.models.ppo.model import MLPActorCritic, MLPQNetwork
 from pyarrow import deserialize, serialize
 from utils import logger
 from utils.data_trans import (create_experiment_dir, find_new_weights,

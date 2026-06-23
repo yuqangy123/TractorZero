@@ -285,7 +285,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
                     # snatched = env.getSnatched()
                     # level = env.getLevel()
                     # play_pos = env.getPlayerPosition()                    
-                    # hold = env.getPlayerHoldCards(play_pos)
+                    # hold = env.getPlayerHandCards(play_pos)
                     # ret = env.call_Snatch(get_card, hold, called, snatched, level)
                     # response = [play_pos, ret]
                     # if len(ret) > 0:
@@ -298,7 +298,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
                     # major_color = response[2]
                     
                     banker = env.getBanker()
-                    hold_cards = env.getPlayerHoldCards(banker)
+                    hold_cards = env.getPlayerHandCards(banker)
                     cover_seat = banker                    
                     cover_cards = random.sample(hold_cards, 8)
                     response = [cover_seat, cover_cards]
@@ -340,7 +340,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
                     card_play_action_seq = []
                     
                     #手牌
-                    hand_cards = [cards2matrix([env.getPlayerHoldCards(i)]) for i in range(__PLAYER_COUNT__)]
+                    hand_cards = [cards2matrix([env.getPlayerHandCards(i)]) for i in range(__PLAYER_COUNT__)]
                     #mask隐蔽牌
                     mask_cards = [cards2matrix([1 for _ in range(__CARDS_NUM__)]) for _ in range(__PLAYER_COUNT__)]
                     #去掉自己的手牌
@@ -398,7 +398,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
                 elif stage == "play":
                     p = env.getPlayerPosition()
                     banker = env.getBanker()
-                    hold = env.getPlayerHoldCards(p)
+                    hold = env.getPlayerHandCards(p)
                     infoset[p]['hand_cards'] = cards2matrix(hold)
                     infoset[p]['my_seat'] = get_one_hot_array(p+1, __PLAYER_COUNT__)
                     infoset[p]['played_score_cards'] = played_score_cards
@@ -428,7 +428,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
                    
                     #执行游戏出牌
                     history_curr = env.getCurrRoundPlayHistory()
-                    hold = env.getPlayerHoldCards(play_pos)
+                    hold = env.getPlayerHandCards(play_pos)
                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
                     playcard_mtrx = cards2matrix(response[1])
@@ -537,7 +537,7 @@ def step(i, device, actor, batch_queues, buffers, flags):
 
                 #一回合结束
                 elif stage == 'roundend' or stage == 'gameend':
-                    if len(env.getPlayerHoldCards(env.getPlayerPosition())) <= threshold_handcards:
+                    if len(env.getPlayerHandCards(env.getPlayerPosition())) <= threshold_handcards:
                         record_index = True
                     
                     round_score = env.getLastRoundScore()

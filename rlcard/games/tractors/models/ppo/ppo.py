@@ -89,7 +89,7 @@ class PPOAgent:
 
 
 if __name__ == '__main__':
-    from model import MLPActorCritic, MLPQNetwork
+    from rlcard.games.tractors.models.ppo.model import MLPActorCritic, MLPQNetwork
     device = 'cuda'
     model = MLPActorCritic((10, 567), 1).to(device)
     model_q = MLPQNetwork(567).to(device)
