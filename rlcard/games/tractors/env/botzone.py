@@ -1383,8 +1383,11 @@ class tractorGame():
     def getFristPlaySeat(self):
         return self.globalInfo["history"][3]
     #获取最后一次的叫分
-    def getLeastBidScore(self):
-        return self.globalInfo["bid_seq"][-1][1]
+    def getLeastBidScore(self):        
+        for i in range(__PLAYER_COUNT__):
+            if self.globalInfo["bid_seq"][-i-1][1] > 0:
+                return self.globalInfo["bid_seq"][-i-1][1]
+            
         #self.globalInfo["bid_seq"].append([bid_seat, bid_score])
     
 

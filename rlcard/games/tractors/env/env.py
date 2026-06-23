@@ -39,25 +39,20 @@ class Env:
         #     pos = self._bidding_player_position
 
         self._env.step(action)
-            
         
-            
-
         done = False
         reward = 0.0
         if self._game_over:
             done = True
-            reward = {
-                "play": {
-                    "landlord": self._get_reward("landlord") / 2,
-                    "landlord_down": self._get_reward("landlord_down"),
-                    "landlord_up": self._get_reward("landlord_up"),
-                    "first": self._get_reward_bidding("first"),
-                    "second": self._get_reward_bidding("second"),
-                    "third": self._get_reward_bidding("third"),
-                }
-            }
-            # self._env.reset()
+            # reward = {
+            #     "play": {
+            #         "banker": self._get_reward("banker"),
+            #         "banker_down": self._get_reward("banker_down"),
+            #         "banker_up": self._get_reward("banker_up"),
+            #         "bid": self._get_reward_bid(),
+            #         "cover": self._get_reward_cover(),
+            #     }
+            # }
             obs = None
             
         else:
@@ -69,32 +64,36 @@ class Env:
             else:
                 self.infoset = self._bid_infoset
             obs = get_obs(self.infoset, self._stage)
-        return obs, reward, done
+            # reward = {
+            #     "play": {
+            #         "banker": self._get_reward("banker"),
+            #         "banker_down": self._get_reward("banker_down"),
+            #         "banker_up": self._get_reward("banker_up"),
+            #     }
+            # }
+        return obs, done
 
-    def _get_reward(self, pos):
-        winner = self._game_winner
+    def _get_reward(self):
+        banker = self._env.getBanker()
+        bid_score = self._env.getLeastBidScore()
+        round_score = self._env.getLastRoundScore()
+        game_score = self._env.getTotalScore()
+        last_game_score = game_score - round_score
+        play_rights = self._env.getFristPlaySeat()
 
-        bomb_num = self._game_bomb_num + 1 if self._env.spring else self._game_bomb_num
-        bid_count = self._env.bid_count
+        base_reward = round_score/100.0
+        rule_mult = 1 if banker == play_rights else -1
+        
+        
+        
+        reward = {}
+        reward['banker'].append(mult*reward)
+        reward['banker_down'].append(-mult*reward)
+        reward['banker_up'].append(-mult*reward)
+        
+        return reward
 
-        multiply = 2
-        if pos != 'landlord':
-            pos = 'farmer'
-            multiply = 1
-
-        if bomb_num == 0:
-            r = bid_count
-        elif bomb_num == 1:
-            r = bid_count * (1 + bomb_num)
-        else:
-            r = bid_count * (2 + 2 * (bomb_num - 1))
-
-        if pos == winner:
-            return r * multiply / 24
-        else:
-            return -r * multiply / 24
-
-    def _get_reward_bidding(self, pos):
+    def _get_reward_bid(self, pos):
         winner = self._bid_winner
         bomb_num = self._game_bomb_num + 1 if self._env.spring else self._game_bomb_num
         bid_count = self._env.bid_count
