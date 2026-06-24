@@ -1704,6 +1704,8 @@ class tractorGame():
         # print("getLegalPlayCard.deck", poker_deck, '\r\n', deck)
         
         all_hands = [[] for _ in range(__WRONG__)]
+        
+        
 
         # 首发
         if len(history) == 0: 

@@ -61,7 +61,7 @@ class InfoSet(object):
 
         self.round_play_cards = None
 
-        self.last_round_played_cards = None
+        self.last_round_play_cards = None
         
         self.mask_cards = None
         
@@ -112,7 +112,7 @@ class GameEnv(tractors):
         self.remain_score_cards = remain_score_cards
 
         self.round_play_cards = {'banker':[], 'banker_up':[], 'banker_down':[]}
-        self.last_round_played_cards = {'banker':[], 'banker_up':[], 'banker_down':[]}
+        self.last_round_play_cards = {'banker':[], 'banker_up':[], 'banker_down':[]}
         
         self.mask_cards = {'banker':range(108), 'banker_up':range(108), 'banker_down':range(108)}
        
@@ -129,6 +129,8 @@ class GameEnv(tractors):
 
     def step(self, response):
         env = self
+        
+        response.insert(0, env.getPlayerPosition())
         
         #step前置处理，更新env缓存数据
         last_stage = env.getStage()
@@ -149,7 +151,7 @@ class GameEnv(tractors):
                 for c in hand_cards:self.mask_cards[r].remove(c)
             
         #step
-        super().step(response)                    
+        super().step(response)
         err = env.getError()
         if len(err)>0:
             print(err[len(err)-1])
@@ -198,16 +200,33 @@ class GameEnv(tractors):
             
             
             self.game_infoset[rule].round_play_cards = {}
-            self.game_infoset[rule].last_round_played_cards = {}
+            self.game_infoset[rule].last_round_play_cards = {}
             self.game_infoset[rule].mask_cards = {}
             self.game_infoset[rule].num_cards_left = {}
             
+            #如果是垫牌，说明该玩家已经没有该花色            
+            history_curr = env.getCurrRoundPlayHistory()
+            if response[2] == __DISCARD__ and len(history_curr) > 1:
+                majors = env.getMajorCards()
+                if history_curr[0][0] in majors:
+                    for card in majors:
+                        if card in self.mask_cards[rule]:self.mask_cards[rule].remove(card)
+                else:
+                    play_suit = (history_curr[0][0])%4
+                    for c in range(14):
+                        for bt in [0, 54]:
+                            card = c+play_suit+bt
+                            if card in self.mask_cards[rule]:
+                                self.mask_cards[rule].remove(card)
+                        
             for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
                 self.game_infoset[rule].round_play_cards[r] =  self.round_play_cards[r][:]
                 
-                self.game_infoset[rule].last_round_played_cards[r] =  self.last_round_played_cards[r][:]
+                self.game_infoset[rule].last_round_play_cards[r] =  self.last_round_play_cards[r][:]
 
-                for c in response[1]:self.mask_cards[r].remove(c)
+                for c in response[1]:
+                    if c in self.mask_cards[r]:
+                        self.mask_cards[r].remove(c)
                 self.game_infoset[rule].mask_cards[r] =  self.mask_cards[r][:]
 
                 self.game_infoset[rule].num_cards_left[r] = env.getPlayerLeftHandCards((banker_pos+1)%__PLAYER_COUNT__)
@@ -218,7 +237,7 @@ class GameEnv(tractors):
             
             self.game_infoset[rule].game_score = env.getGameScore()
             
-            history_curr = env.getCurrRoundPlayHistory()
+            
             hold = env.getPlayerHandCards(play_pos)
             playedCards = env.getLegalPlayCard(history_curr, hold, env.getLevel())
             self.game_infoset[rule].legal_actions = playedCards
@@ -229,7 +248,7 @@ class GameEnv(tractors):
         #一回合结束
         elif self.stage == 'roundend':
             for r, cards in self.round_play_cards.items():
-                self.last_round_played_cards[r] = cards[:]
+                self.last_round_play_cards[r] = cards[:]
                 self.round_play_cards[r] = []
                 
         elif self.stage == 'gameend':

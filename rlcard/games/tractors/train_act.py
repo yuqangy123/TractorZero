@@ -17,7 +17,7 @@ def act(i, device, batch_queues, model, flags):
         env = create_env(flags)
         env = Environment(env, device)
 
-        done_buf = {p: [] for p in positions}
+        # done_buf = {p: [] for p in positions}
         # episode_return_buf = {p: [] for p in positions}
         target_adp_buf = {p: [] for p in positions}
         target_wp_buf = {p: [] for p in positions}
@@ -46,13 +46,16 @@ def act(i, device, batch_queues, model, flags):
                     
                     play_type_buf.append(_action_tp)
                     play_action_buf.append(torch.from_numpy(action))
+                    action = [action, _action_tp]
                     
                 else:
                     action = agent_output['action']
                     if position == 'bid':
                         bid_action_buf.append(action)
+                        action = [action, agent_output['suit']]
                     elif position == 'cover':
                         cover_action_buf.append(action)
+                        action = [action]
                     else:
                         raise ValueError(f"unkown position:{position}")
                     
@@ -72,9 +75,8 @@ def act(i, device, batch_queues, model, flags):
                     for p in ['banker', 'banker_up', 'banker_down']:
                         diff = size[p] - len(target_wp_buf[p])
                         if diff > 0:
-                            done_buf[p].extend([False for _ in range(diff - 1)])
-                            done_buf[p].append(True)
-                            
+                            # done_buf[p].extend([False for _ in range(diff - 1)])
+                            # done_buf[p].append(True)
                             wp_return = game_reward[p]
                             target_wp_buf[p].extend([wp_return for _ in range(diff)])
                             
@@ -83,46 +85,62 @@ def act(i, device, batch_queues, model, flags):
                     
                     break
 
-            for p in positions:
+            for p in ['banker', 'banker_up', 'banker_down']:
                 if size[p] > T:
                     batch_queues[p].put({
-                        "done": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in done_buf[p][:T]]),
-                        "episode_return": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in episode_return_buf[p][:T]]),
+                        # "done": torch.stack(
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in done_buf[p][:T]]),
                         "target_adp": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in target_adp_buf[p][:T]]),
                         "target_wp": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in target_wp_buf[p][:T]]),
-                        "target_wp_bid": torch.stack(
-                            [ndarr.clone().detach() for ndarr in target_wp_bid_buf[p][:T]]),
-                        "obs_z": torch.stack([ndarr.clone().detach() for ndarr in obs_z_buf[p][:T]]),
-                        "obs_x_batch": torch.stack(
-                            [ndarr.clone().detach() for ndarr in obs_x_batch_buf[p][:T]]),
+                        "play_type": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in play_type_buf[p][:T]]),
+                        "play_action": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in play_action_buf[p][:T]]),
+                        "obs_z": torch.stack(
+                            obs_z_buf[p][:T]),
+                        "obs_x": torch.stack(
+                            obs_x_buf[p][:T]),
                     })
-                    done_buf[p] = done_buf[p][T:]
-                    episode_return_buf[p] = episode_return_buf[p][T:]
+                    
                     target_adp_buf[p] = target_adp_buf[p][T:]
                     target_wp_buf[p] = target_wp_buf[p][T:]
-                    target_wp_bid_buf[p] = target_wp_bid_buf[p][T:]
-                    obs_x_batch_buf[p] = obs_x_batch_buf[p][T:]
+                    play_type_buf[p] = play_type_buf[p][T:]
+                    play_action_buf[p] = play_action_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
+                    obs_x_buf[p] = obs_x_buf[p][T:]
                     size[p] -= T
-            # if len(coach_target_buf) > T_C:
-            #     batch_queues['coach'].put({
-            #         "target": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in coach_target_buf[:T_C]]),
-            #         "landlord": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in coach_landlord_cards_buf[:T_C]]),
-            #         "landlord_down": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in coach_landlord_down_cards_buf[:T_C]]),
-            #         "landlord_up": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in coach_landlord_up_cards_buf[:T_C]]),
-            #     })
-            #     coach_target_buf = coach_target_buf[T_C:]
-            #     coach_landlord_cards_buf = coach_landlord_cards_buf[T_C:]
-            #     coach_landlord_down_cards_buf = coach_landlord_down_cards_buf[T_C:]
-            #     coach_landlord_up_cards_buf = coach_landlord_up_cards_buf[T_C:]            
+                    
+            for p in ['bid', 'cover']:
+                if size[p] > T:
+                    batch_queues[p].put({
+                        "target_bid": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in target_bid_buf[p][:T]]),
+                        "target_cover": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in target_cover_buf[p][:T]]),
+                        "bid_action": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_action_buf[p][:T]]),
+                        "cover_action": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_action_buf[p][:T]]),          
+                        "obs_z": 
+                            torch.stack(obs_z_buf[p][:T]),
+                        "obs_x": 
+                            torch.stack(obs_x_buf[p][:T]),
+                    })
+                    
+                    target_bid_buf[p] = target_bid_buf[p][T:]
+                    target_cover_buf[p] = target_cover_buf[p][T:]
+                    bid_action_buf[p] = bid_action_buf[p][T:]
+                    cover_action_buf[p] = cover_action_buf[p][T:]
+                    obs_z_buf[p] = obs_z_buf[p][T:]
+                    obs_x_buf[p] = obs_x_buf[p][T:]
+                    size[p] -= T
+                     
 
     except KeyboardInterrupt:
         print('KeyboardInterrupt')
     except Exception as e:
-        print('Exception in worker process %i', i)
         print('Exception in worker process %i', i)
         traceback.print_exc()        
         raise e    
