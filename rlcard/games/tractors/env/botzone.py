@@ -1958,9 +1958,9 @@ class tractorGame():
                         if subout not in sout:
                             pass
 
-        # print('合法出牌：', out1)
-        ret = self.PokerList2Num(out1, deck)
-        return ret
+        for k,v in all_hands.items():
+            all_hands[k] = self.Pokers2Num(v, deck.copy())
+        return all_hands
     
     
     

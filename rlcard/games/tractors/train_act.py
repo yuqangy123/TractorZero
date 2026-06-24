@@ -2,7 +2,7 @@ from rlcard.games.tractors.env.env import Env
 # from .env.env import Env
 from .env.env_utils import Environment#*
 import torch
-
+import traceback
 
 def create_env(flags):
     return Env(flags.objective)
@@ -18,13 +18,17 @@ def act(i, device, batch_queues, model, flags):
         env = Environment(env, device)
 
         done_buf = {p: [] for p in positions}
-        episode_return_buf = {p: [] for p in positions}
+        # episode_return_buf = {p: [] for p in positions}
         target_adp_buf = {p: [] for p in positions}
         target_wp_buf = {p: [] for p in positions}
         target_bid_buf = {"bid": []}
         target_cover_buf = {"cover": []}
         obs_z_buf = {p: [] for p in positions}
         obs_x_buf = {p: [] for p in positions}
+        play_type_buf = {p: [] for p in positions}
+        play_action_buf = {p: [] for p in positions}
+        bid_action_buf = {"bid": []}
+        cover_action_buf = {"cover": []}
         
         size = {p: 0 for p in positions}
         
@@ -36,75 +40,47 @@ def act(i, device, batch_queues, model, flags):
                 with torch.no_grad():
                     agent_output = model.forward(position, obs['z'], obs['x'], env_output['legal_actions'], flags=flags)                        
                 if position in ['banker', 'banker_up', 'banker_down']:
-                    _action_tp = int(agent_output['action_type'].cpu().detach().numpy())
-                    _action_idx = int(agent_output['action'].cpu().detach().numpy())
+                    _action_tp = agent_output['action_type'].cpu().detach().item()
+                    _action_idx = agent_output['action'].cpu().detach().item()
                     action = env_output['legal_actions'][_action_tp][_action_idx]
                     
+                    play_type_buf.append(_action_tp)
+                    play_action_buf.append(torch.from_numpy(action))
                     
                 else:
                     action = agent_output['action']
+                    if position == 'bid':
+                        bid_action_buf.append(action)
+                    elif position == 'cover':
+                        cover_action_buf.append(action)
+                    else:
+                        raise ValueError(f"unkown position:{position}")
                     
                 
                 obs_z_buf[position].append(obs['z'].detach().cpu())
                 obs_x_buf[position].append(obs['x'].detach().cpu())
-                
-                if position in ['first', 'second', 'third']:
-                    obs_z_buf[position].append(
-                        torch.vstack((torch.full((1, 54), action[0]), env_output['obs_z'])).float())
-                else:
-                    obs_z_buf[position].append(
-                        torch.vstack((_cards2tensor(action).unsqueeze(0), env_output['obs_z'])).float())
-            
-
-                x_batch = env_output['obs_x_no_action'].float()
-                obs_x_batch_buf[position].append(x_batch)
                 size[position] += 1
                 
                 position, obs, env_output = env.step(action, model, device, flags=flags)
-                if env_output['done'] or env_output['draw']:
-                    for p in positions:
-                        diff = size[p] - len(target_adp_buf[p])
+                
+                if env_output['step'] == 'roundend' or env_output['step'] == 'gameend':
+                    step_reward = env._get_step_reward()
+                    target_adp_buf.append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_up']])
+                    
+                if env_output['done']:
+                    game_reward = env._get_reward()
+                    for p in ['banker', 'banker_up', 'banker_down']:
+                        diff = size[p] - len(target_wp_buf[p])
                         if diff > 0:
                             done_buf[p].extend([False for _ in range(diff - 1)])
                             done_buf[p].append(True)
-                            if env_output['draw']:
-                                episode_return = 0.
-                                wp_return = 0.
-                                wp_bid = [0, 0, 1]
-                            else:
-                                episode_return = env_output['episode_return']["play"][p]
-                                wp_return = 1. if episode_return > 0. else -1.
-                                wp_bid = [1, 0, 0] if episode_return > 0. else [0, 1, 0]
-                            episode_return_buf[p].extend([0.0 for _ in range(diff - 1)])
-                            episode_return_buf[p].append(episode_return)
-                            target_adp_buf[p].extend([episode_return for _ in range(diff)])
+                            
+                            wp_return = game_reward[p]
                             target_wp_buf[p].extend([wp_return for _ in range(diff)])
-                            target_wp_bid_buf[p].extend([torch.tensor(wp_bid) for _ in range(diff)])
+                            
+                    target_bid_buf.append(game_reward['bid'])
+                    target_cover_buf.append(game_reward['cover'])
                     
-                    if not env_output['draw']:
-                        landlord_site = 0
-                        win_count = 0
-                        for index, site in enumerate(['first', 'second', 'third']):
-                            if env_output['episode_return']["play"][site]>0.:
-                                win_count += 1
-                                landlord_site = index
-                        target = 1.
-                        if win_count == 2:
-                            target = 0.
-                            for index, site in enumerate(['first', 'second', 'third']):
-                                if env_output['episode_return']["play"][site]<0.:
-                                    landlord_site = index
-                                    break
-                        init_site_cards[landlord_site] += three_landlord_cards
-                        # coach_landlord_cards_buf.append(cards2array(init_site_cards[landlord_site]))
-                        # coach_landlord_down_cards_buf.append(cards2array(init_site_cards[(landlord_site+1)%3]))
-                        # coach_landlord_up_cards_buf.append(cards2array(init_site_cards[(landlord_site+2)%3]))
-                        # coach_target_buf.append(target)
-                        # print(landlord_site, target, \
-                        #       env_output['episode_return']["play"]['first'], \
-                        #         env_output['episode_return']["play"]['second'], \
-                        #             env_output['episode_return']["play"]['third'],\
-                        #                 init_site_cards,  '\n')
                     break
 
             for p in positions:
@@ -147,7 +123,7 @@ def act(i, device, batch_queues, model, flags):
         print('KeyboardInterrupt')
     except Exception as e:
         print('Exception in worker process %i', i)
-        log.error('Exception in worker process %i', i)
+        print('Exception in worker process %i', i)
         traceback.print_exc()        
         raise e    
     print('act over')

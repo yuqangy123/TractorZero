@@ -123,8 +123,8 @@ class Env:
         if banker_win:
             end_score = self._env.getEndingScore(banker)
             reward['banker'] = end_score
-            reward['banker_down'] = -end_score/2.
-            reward['banker_up'] = -end_score/2.
+            reward['banker_down'] = -end_score
+            reward['banker_up'] = -end_score
         else:
             end_score = self._env.getEndingScore((banker+1)%__PLAYER_COUNT__)
             reward['banker'] = -end_score

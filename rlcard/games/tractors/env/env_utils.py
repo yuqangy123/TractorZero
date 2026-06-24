@@ -42,6 +42,7 @@ class Environment:
         return initial_position, initial_obs, dict(
             done=False,
             legal_actions=legal_actions,
+            stage = self.env._stage,
         )
 
     def step(self, action, model, device, flags=None):
@@ -55,6 +56,7 @@ class Environment:
         return position, obs, dict(
             done=done,
             legal_actions=legal_actions,
+            stage = self.env._stage,
         )
     
     def reset(self):
@@ -62,3 +64,10 @@ class Environment:
         
     def close(self):
         self.env.close()
+
+    def _get_step_reward(self):
+        return self.env._get_step_reward()
+    
+    def _get_reward(self):
+        return self.env._get_reward()
+    
