@@ -101,8 +101,8 @@ class GameEnv(tractors):
         self.coving_player_position = 0
         self.acting_player_position = 0
         
-        self.bid_infoset = BidInfoSet('')
-        self.cover_infoset = CoverInfoSet('')
+        self.bid_infoset = BidInfoSet('bid')
+        self.cover_infoset = CoverInfoSet('cover')
         self.game_infoset = {'banker':InfoSet('banker'), 'banker_up':InfoSet('banker_up'), 'banker_down':InfoSet('banker_down')}
         
         self.position = ["banker", 'banker_up', 'banker_down', 'bid', 'cover']
@@ -119,9 +119,7 @@ class GameEnv(tractors):
         super().reset()
         
         #初始化bid_infoset
-        play_pos = self.getPlayerPosition()
-        self.bid_infoset.player_position = play_pos
-        self.bid_infoset.player_hand_cards = self.getPlayerHandCards(play_pos)
+        self.bid_infoset.player_hand_cards = self.getPlayerHandCards(self.getPlayerPosition())
         self.bid_infoset.bid_score = 80#最少叫80分
         self.bid_infoset.mask_bid_score = 80
         
@@ -219,6 +217,11 @@ class GameEnv(tractors):
             self.game_infoset[rule].bid_score = env.getLeastBidScore()
             
             self.game_infoset[rule].game_score = env.getGameScore()
+            
+            history_curr = env.getCurrRoundPlayHistory()
+            hold = env.getPlayerHandCards(play_pos)
+            playedCards = env.getLegalPlayCard(history_curr, hold, env.getLevel())
+            self.game_infoset[rule].legal_actions = playedCards
             
             self.acting_player_position = play_pos
                         

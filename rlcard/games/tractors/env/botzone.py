@@ -40,7 +40,6 @@ class tractorGame():
         self.errored = [[] for _ in range(__PLAYER_COUNT__)]
         self.Major = __MAJOR__.copy()
         self.get_score = 0 # 闲家得分，每次step前清空一下该值
-        self.get_public_score = 0 # 底牌得分
         self.get_score_pok=[]# 得分牌，每次step前清空一下该值
         self.globalInfo = {"stage":"gameend"} # 未确定主花色前为空
         
@@ -152,26 +151,26 @@ class tractorGame():
             raise ValueError("SYSTEM_ERROR")
         
         
-        endingScores = {}
+        endingScores = [0]*__PLAYER_COUNT__
         for i in range(__PLAYER_COUNT__):
             if i == player:
-                endingScores[str(i)] = -3 # 出错会被额外扣分
+                endingScores[i] = -3 # 出错会被额外扣分
             elif i == (player + 2) % __PLAYER_COUNT__:
-                endingScores[str(i)] = 0
+                endingScores[i] = 0
             else:
-                endingScores[str(i)] = 1
+                endingScores[i] = 1
         
         self.errored[player].append([reason, endingScores])
         self.erro_code = 1
-        print(json.dumps({
-            "command": "finish",
-            "content": endingScores,
-            "display": {
-                "currplayer": player,
-                "score": endingScores,
-                "error": self.errored
-            }
-        }))
+        # print(json.dumps({
+        #     "command": "finish",
+        #     "content": endingScores,
+        #     "display": {
+        #         "currplayer": player,
+        #         "score": endingScores,
+        #         "error": self.errored
+        #     }
+        # }))
         
         
         #test code
@@ -1173,83 +1172,62 @@ class tractorGame():
         if currplayer != banker: # 非庄家得分
             self.get_score += score
             
-    def RewardPublic(self, score, currplayer, banker):
-        if currplayer != banker: # 非庄家得分
-            self.get_score += score
 
     # return endingScores(dict)
     def EndGame(self, banker, score):
-        endingScores = {}
+        endingScores = [0]*__PLAYER_COUNT__
         bankers = [banker]
         up_level_step = 1#晋升的级数
-        banker_win = score < 80
-        if score <= 0: # 大光，庄家得3分
+        bid_score = self.getLeastBidScore()
+        banker_win = score < bid_score
+        if score == 0: # 大光，庄家得3分
             up_level_step = 3
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
                     self.total_score[i] += 3
-                    endingScores[str(i)] = 3
+                    endingScores[i] = 3
                 else: 
-                    endingScores[str(i)] = 0
-        elif score < 40: # 小光，庄家得2分
+                    endingScores[i] = 0
+        elif score < bid_score/2.: # 小光，庄家得2分
             up_level_step = 2
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
                     self.total_score[i] += 2
-                    endingScores[str(i)] = 2
+                    endingScores[i] = 2
                 else:
-                    endingScores[str(i)] = 0
-        elif score < 80: # 庄家得1分
+                    endingScores[i] = 0
+        elif score < bid_score: # 庄家得1分
             up_level_step = 1
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
                     self.total_score[i] += 1
-                    endingScores[str(i)] = 1
+                    endingScores[i] = 1
                 else:
-                    endingScores[str(i)] = 0
-        elif score < 120: # 闲家得1分
+                    endingScores[i] = 0
+        elif score < bid_score*2: # 闲家得1分
             up_level_step = 0
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[str(i)] = 0
+                    endingScores[i] = 0
                 else:
                     self.total_score[i] += 1
-                    endingScores[str(i)] = 1
-        elif score < 160: # 闲家得2分
+                    endingScores[i] = 1
+        elif score < bid_score*2: # 闲家得2分
             up_level_step = 1
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[str(i)] = 0
+                    endingScores[i] = 0
                 else:
                     self.total_score[i] += 2
-                    endingScores[str(i)] = 2
+                    endingScores[i] = 2
         else: 
             up_level_step = 2
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[str(i)] = 0
+                    endingScores[i] = 0
                 else:
                     self.total_score[i] += 3
-                    endingScores[str(i)] = 3
-        
-        bidsseat = self.globalInfo['bidsseat']
-        #扣底分
-        if bidsseat not in bankers and score >= 80:
-            public_score = 0
-            mult = 1
-            for c in self.globalInfo["publiccard"]:
-                if (c >= 16 and c <= 19) or (c >= 16+54 and c <= 19+54): public_score += 5
-                elif (c >= 36 and c <= 39) or (c >= 36+54 and c <= 39+54): public_score += 10
-                elif (c >= 48 and c <= 51) or (c >= 48+54 and c <= 51+54): public_score += 10
-            if public_score >= 120 and public_score < 160: mult = 2
-            elif public_score >= 160 and public_score < 200: mult = 3
-            else: mult = 4
-            
-            for i in range(__PLAYER_COUNT__):
-                if i not in bankers:
-                    self.total_score[i] += endingScores[str(i)]*(mult-1)
-                    endingScores[str(i)] *= mult
-                    
+                    endingScores[i] = 3                 
             
         
         # 点数升级，更新庄家位置
@@ -1320,25 +1298,24 @@ class tractorGame():
     def getDeliver(self):
         return self.globalInfo["deliver"][:]
     
-    #获取目前总得分
-    def getTotalScore(self):
-        return self.globalInfo["total_score"]
+    #获取目前所有局的总结算分
+    def getTotalScore(self, pos):
+        return self.globalInfo["total_score"][pos]
     
-    #获取当局得分
-    def getEndingScore(self):
-        return self.globalInfo["ending_score"]
+    #获取当局结算分
+    def getEndingScore(self, pos):
+        return self.globalInfo["ending_score"][pos]
     
+    #获取局内分数
+    def getGameScore(self):
+        return self.globalInfo["game_score"]
     
     # 获取上一轮次的分数
     def getLastRoundScore(self):
         return self.get_score
     def getLastRoundScorePoke(self):
         return self.get_score>0 and self.get_score_pok or []
-    
-    #当局的分数
-    def getGameScore(self):
-        return self.globalInfo["game_score"]
-    
+        
     # 获取错误码
     def getErrorCode(self):
         return self.erro_code
@@ -1726,7 +1703,7 @@ class tractorGame():
         poker_deck = [self.num2Poker(id) for id in deck]
         # print("getLegalPlayCard.deck", poker_deck, '\r\n', deck)
         
-        
+        all_hands = [[] for _ in range(__WRONG__)]
 
         # 首发
         if len(history) == 0: 
@@ -1740,19 +1717,17 @@ class tractorGame():
             ret_single = self.getTypePoke(poker_deck, level, type = [__SINGLE__])
             ret_pair = self.getTypePoke(poker_deck, level, type = [__PAIR__])
             ret_tractor = self.getTypePoke(poker_deck, level, type = [__TRACTOR__])
+            ret_suspect = self.getTypePoke(poker_deck, level, type = [__SUSPECT__])
+                        
+            all_hands[__SINGLE__] = ret_single.get(__SINGLE__, [])
+            all_hands[__PAIR__] = ret_pair.get(__PAIR__, [])
+            all_hands[__TRACTOR__] = ret_tractor.get(__TRACTOR__, [])
+            all_hands[__SUSPECT__] = ret_suspect.get(__SUSPECT__, [])
             
-            # 合并字典中的列表值
-            all_hands = []
-            all_hands.extend(ret_single.get(__SINGLE__, []))
-            all_hands.extend(ret_pair.get(__PAIR__, []))
-            all_hands.extend(ret_tractor.get(__TRACTOR__, []))
-            
-            ret = self.PokerList2Num(all_hands, deck.copy())
-            
-            # ret = ret_single + ret_pair + ret_tractor
-            # ret = self.PokerList2Num([poke for pokes in ret.values() for poke in pokes], deck.copy())
-            # return ret[random.randint(0, len(ret))]
-            return ret
+            for k,v in all_hands.items():
+                all_hands[k] = self.Pokers2Num(v, deck.copy())
+                
+            return all_hands
         
         
         
@@ -1778,13 +1753,13 @@ class tractorGame():
                     #print("major")
                     deck_Major = [pok for pok in poker_deck if pok in self.Major]
                     
-                    if len(deck_Major) < len(standard_poker):#手上主牌数少于出牌数
+                    #手上主牌数量不够
+                    if len(deck_Major) < len(standard_poker):
                         my_major = deck_Major[:]
                         deck_nMajor = [pok for pok in poker_deck if pok not in self.Major]
                         comb_nMajor = list(combinations(deck_nMajor, len(standard_poker) - len(deck_Major)))
-                        out = []
                         for comb in comb_nMajor:
-                            out.append(my_major + list(comb))
+                            all_hands[__DISCARD__].append(my_major + list(comb))
                         
                         
                          
@@ -1804,21 +1779,21 @@ class tractorGame():
                         target_len = len(standard_poker)
                         #单牌
                         if target_len == 1:
-                            out = self.getTypePoke(deck_Major, level, [__SINGLE__])[__SINGLE__]
+                            all_hands[__SINGLE__] = self.getTypePoke(deck_Major, level, [__SINGLE__])[__SINGLE__]
                         #对子
                         elif target_len == 2:
-                            out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
-                            if len(out) == 0:
+                            all_hands[__PAIR__] = self.getTypePoke(deck_Major, level, ['pair'])['pair']
+                            if len(all_hands[__PAIR__]) == 0:
                                 single_out = self.getTypePoke(deck_Major, level, [__SINGLE__])[__SINGLE__]
-                                out = list(combinations(single_out, target_len))
+                                all_hands[__PAIR__] = list(combinations(single_out, target_len))
                         #拖拉机
                         else:
-                            out = self.parseTractorPoker(deck_Major, level, target_len)
-                            if len(out) == 0:#没有匹配的牌型
+                            all_hands[__TRACTOR__] = self.parseTractorPoker(deck_Major, level, target_len)
+                            if len(all_hands[__TRACTOR__]) == 0:#没有匹配的牌型
                                 pair_out = self.getTypePoke(deck_Major, level, ['pair'])['pair']
                                 pair_comb_out = list(combinations(pair_out, target_len//2))
-                                out = [list(itertools.chain.from_iterable(pairs)) for pairs in pair_comb_out]
-                                if len(out) == 0:#没有相同数量的对子组合
+                                all_hands[__TRACTOR__] = [list(itertools.chain.from_iterable(pairs)) for pairs in pair_comb_out]
+                                if len(all_hands[__TRACTOR__]) == 0:#没有相同数量的对子组合
                                     pair_out = [pair for pairs in pair_out for pair in pairs]
                                         
                                     single_out = self.getTypePoke(deck_Major, level, [__SINGLE__])[__SINGLE__]
@@ -1827,7 +1802,7 @@ class tractorGame():
                                     pair_comb_out = list(combinations(single_out, remain_len))
                                     
                                     for single_comb in pair_comb_out:
-                                        out.append(pair_out + list(single_comb))
+                                        all_hands[__TRACTOR__].append(pair_out + list(single_comb))
                                             
                                     
                                      
@@ -1857,12 +1832,12 @@ class tractorGame():
                     #print("not_major")
                     suit = standard_poker[0][0]
                     deck_suit = [pok for pok in poker_deck if pok[0] == suit and pok[1] != level]
-                    if len(deck_suit) <= len(standard_poker):#副牌数量不够
+                    #副牌数量不够
+                    if len(deck_suit) <= len(standard_poker):
                         deck_unSuit = [pok for pok in poker_deck if pok not in deck_suit]
                         comb_unSuit = list(combinations(deck_unSuit, len(standard_poker) - len(deck_suit)))
-                        out = []
                         for comb in comb_unSuit:
-                            out.append(deck_suit + list(comb))
+                            all_hands[__DISCARD__].append(deck_suit + list(comb))
                             
                         # out = deck_suit
                         # deck_nsuit = [pok for pok in poker_deck if pok not in deck_suit]
@@ -1880,11 +1855,11 @@ class tractorGame():
                         response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
                         target_len = len(standard_poker)                        
                         if target_len == 1:#单牌
-                            out = [[p] for p in deck_suit]
+                            all_hands[__SINGLE__] = [[p] for p in deck_suit]
                         else:#对子，拖拉机
-                            out = self.parseTractorPoker(deck_suit, level, target_len)
-                            if len(out) == 0:
-                                out = list(combinations(deck_suit, target_len))
+                            all_hands[__PAIR__] = self.parseTractorPoker(deck_suit, level, target_len)
+                            if len(all_hands[__PAIR__]) == 0:
+                                all_hands[__PAIR__] = list(combinations(deck_suit, target_len))
 
                             # target_parse = self.parseTractorPoker(deck_suit, level, target_len)
                             # target_parse.sort(key=lambda x: len(x), reverse=True)
@@ -1905,56 +1880,56 @@ class tractorGame():
                 #print("major")
                 deck_Major = [pok for pok in poker_deck if pok in self.Major]
                 
-                #手上的主牌不够，还需要加上副牌来凑数量
+                #手上的主牌数量不够，还需要加上副牌来凑
                 if len(deck_Major) < len(standard_poker):
                     deck_unMajor = [pok for pok in poker_deck if pok not in self.Major]
                     comb_unMajor = list(combinations(deck_unMajor, len(standard_poker) - len(deck_Major)))
-                    out = []
                     for comb in comb_unMajor:
-                        out.append(deck_Major + list(comb))
+                        all_hands[__DISCARD__].append(deck_Major + list(comb))
                 
                 #数量正好相等
                 elif len(deck_Major) == len(standard_poker):
-                    out = [deck_Major]
+                    all_hands[__SUSPECT__] = [deck_Major]
 
                 #手上的主牌数量够，甩牌
                 else:
-                    out = self.suspectMatchCard(deck_Major, standard_poker, level)
+                    all_hands[__SUSPECT__] = self.suspectMatchCard(deck_Major, standard_poker, level)
                     
             #副牌甩牌
             else:
                 suit = standard_poker[0][0]
                 deck_suit = [pok for pok in poker_deck if pok[0] == suit and pok[1] != level]
 
-                #可出副牌数不够
+                #副牌数不够
                 if len(deck_suit) < len(standard_poker):
                     deck_nsuit = [pok for pok in poker_deck if pok not in deck_suit]
-                    out = []
                     comb_poks = list(combinations(deck_nsuit, len(standard_poker) - len(deck_suit)))
                     for poks in comb_poks:
-                        out.append(deck_suit + list(poks))
+                        all_hands[__DISCARD__].append(deck_suit + list(poks))
 
                 #数量正好相等
                 elif len(deck_suit) == len(standard_poker):
-                    out = [deck_suit]
+                    all_hands[__SUSPECT__] = [deck_suit]
 
                 #可出副牌数够
                 else:
-                    out = self.suspectMatchCard(deck_suit, standard_poker, level)
+                    all_hands[__SUSPECT__] = self.suspectMatchCard(deck_suit, standard_poker, level)
 
         ret = []
+        
         #test code
-        for poks in out:
-            _deck = deck[:] + []
-            for pok in poks:
-                if type(pok) == list:
-                    self.getLegalPlayCard(history, deck, level)
-                    pass
-                cardid = self.Poker2Num(pok, _deck)
-                if cardid not in _deck:
-                    print(self.Pokers2Num(poks,_deck))
-                    self.getLegalPlayCard(history, deck, level)
-                _deck.remove(cardid)
+        for tp, actions in enumerate(all_hands):
+            for poks in actions:
+                _deck = deck[:] + []
+                for pok in poks:
+                    if type(pok) == list:
+                        self.getLegalPlayCard(history, deck, level)
+                        pass
+                    cardid = self.Poker2Num(pok, _deck)
+                    if cardid not in _deck:
+                        print(self.Pokers2Num(poks,_deck))
+                        self.getLegalPlayCard(history, deck, level)
+                    _deck.remove(cardid)
         
         
         
@@ -1962,43 +1937,32 @@ class tractorGame():
         repeats = dict()
         repeats2 = dict()
         out1 = []
-        for poks in out:
-            outstr = ''.join(poks)
-            if outstr not in repeats:
-                out1.append(poks)
-            else:
-                repeats2[outstr] = poks
-            repeats[outstr] = poks
+        for tp, actions in enumerate(all_hands):
+            for poks in actions:
+                outstr = ''.join(poks)
+                if outstr not in repeats:
+                    out1.append(poks)
+                else:
+                    repeats2[outstr] = poks
+                repeats[outstr] = poks
         
-        global __MAX_ACTION_NUM__#test code
+        #test code
+        global __MAX_ACTION_NUM__
         if __MAX_ACTION_NUM__ < len(out1):
             __MAX_ACTION_NUM__ = len(out1)
             print(f'最大动作空间：{__MAX_ACTION_NUM__}, pid={os.getpid()}')
-            sout = sorted(out)
-            if sout != out:
-                for subout in out:
-                    if subout not in sout:
-                        pass
+            for tp, actions in enumerate(all_hands):
+                sout = sorted(actions)
+                if sout != actions:
+                    for subout in actions:
+                        if subout not in sout:
+                            pass
 
         # print('合法出牌：', out1)
         ret = self.PokerList2Num(out1, deck)
         return ret
     
-    def getLegalActions(self, history, deck, level):        
-        poker_deck = [self.num2Poker(id) for id in deck]
-        
-        # 首发
-        if len(history) == 0: 
-            response = self.getTypePoke(poker_deck, level, type = [__SINGLE__, __PAIR__, __TRACTOR__])#__SUSPECT__ 先不考虑甩牌
-            return response
-       
-        standard_move = history[0]
-        standard_poker = [self.num2Poker(id) for id in standard_move]
-        own_pok = [self.num2Poker(p) for p in deck]
-        response = self.checkResUnSuspect_repsect(standard_poker, own_pok, level)
-        for tp, tp_pok_list in response:
-            response[tp] = self.PokerList2Num(tp_pok_list, deck)
-        return response
+    
     
     #own_pok数量>=standard_poker，则直接匹配可出牌型
     def suspectMatchCard(self, own_pok, standard_pok, level):
@@ -2056,7 +2020,6 @@ class tractorGame():
     # global里包含了主花色、级牌、庄家（覆盖）、报主情况
     def step(self, response=None):
         self.get_score = 0
-        self.get_public_score = 0
         self.get_score_pok = []
         self.erro_code = 0
         self.step_count += 1
@@ -2187,7 +2150,8 @@ class tractorGame():
                         
                         self.Reward(publicscore*mult, winner, banker)
                         new_score = old_score + self.get_score
-
+                        self.globalInfo["game_score"] = new_score
+                        
                         history[0] = old_history
                         history[1] = new_history
                         self.globalInfo["history"] = history

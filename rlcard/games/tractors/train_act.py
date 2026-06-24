@@ -1,16 +1,17 @@
 from rlcard.games.tractors.env.env import Env
-from .env.env import Env
+# from .env.env import Env
 from .env.env_utils import Environment#*
+import torch
 
 
 def create_env(flags):
     return Env(flags.objective)
 
 def act(i, device, batch_queues, model, flags):
-    positions = ['banker', 'idler_up', 'idler_down', 'bid']
+    positions = ["banker", 'banker_up', 'banker_down', 'bid', 'cover']
+    
     try:
         T = flags.unroll_length
-        T_C = flags.unroll_length_coach
         print('Device %s Actor %i started.', str(device), i)
 
         env = create_env(flags)
@@ -20,43 +21,40 @@ def act(i, device, batch_queues, model, flags):
         episode_return_buf = {p: [] for p in positions}
         target_adp_buf = {p: [] for p in positions}
         target_wp_buf = {p: [] for p in positions}
-        target_wp_bid_buf = {p: [] for p in positions}
+        target_bid_buf = {"bid": []}
+        target_cover_buf = {"cover": []}
         obs_z_buf = {p: [] for p in positions}
+        obs_x_buf = {p: [] for p in positions}
+        
         size = {p: 0 for p in positions}
-        obs_x_batch_buf = {p: [] for p in positions}
-        # coach_landlord_cards_buf = []
-        # coach_landlord_down_cards_buf = []
-        # coach_landlord_up_cards_buf = []
-        # coach_target_buf = []
-
-
+        
         position, obs, env_output = env.initial(model, device, flags=flags)
         # pid = threading.get_ident()
         
         while True:
-            init_site_cards = [env_output['game_infoset'].all_handcards['first'], env_output['game_infoset'].all_handcards['second'], env_output['game_infoset'].all_handcards['third']]
-            three_landlord_cards = env_output['game_infoset'].three_landlord_cards
             while True:
-                if len(obs['legal_actions']) > 1:
-                    with torch.no_grad():
-                        agent_output = model.forward(position, obs['z_batch'], obs['x_batch'], flags=flags, game_infoset=env_output['game_infoset'])                        
+                with torch.no_grad():
+                    agent_output = model.forward(position, obs['z'], obs['x'], env_output['legal_actions'], flags=flags)                        
+                if position in ['banker', 'banker_up', 'banker_down']:
+                    _action_tp = int(agent_output['action_type'].cpu().detach().numpy())
                     _action_idx = int(agent_output['action'].cpu().detach().numpy())
-                    action = obs['legal_actions'][_action_idx]
-
-                    if position in ['first', 'second', 'third']:
-                        obs_z_buf[position].append(
-                            torch.vstack((torch.full((1, 54), action[0]), env_output['obs_z'])).float())
-                    else:
-                        obs_z_buf[position].append(
-                            torch.vstack((_cards2tensor(action).unsqueeze(0), env_output['obs_z'])).float())
+                    action = env_output['legal_actions'][_action_tp][_action_idx]
+                    
+                    
                 else:
-                    action = obs['legal_actions'][0]
-                    if position in ['first', 'second', 'third']:
-                        obs_z_buf[position].append(
-                            torch.vstack((torch.full((1, 54), action[0]), env_output['obs_z'])).float())
-                    else:
-                        obs_z_buf[position].append(
-                            torch.vstack((_cards2tensor(action).unsqueeze(0), env_output['obs_z'])).float())
+                    action = agent_output['action']
+                    
+                
+                obs_z_buf[position].append(obs['z'].detach().cpu())
+                obs_x_buf[position].append(obs['x'].detach().cpu())
+                
+                if position in ['first', 'second', 'third']:
+                    obs_z_buf[position].append(
+                        torch.vstack((torch.full((1, 54), action[0]), env_output['obs_z'])).float())
+                else:
+                    obs_z_buf[position].append(
+                        torch.vstack((_cards2tensor(action).unsqueeze(0), env_output['obs_z'])).float())
+            
 
                 x_batch = env_output['obs_x_no_action'].float()
                 obs_x_batch_buf[position].append(x_batch)

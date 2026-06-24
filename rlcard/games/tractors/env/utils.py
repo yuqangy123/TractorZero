@@ -48,6 +48,8 @@ __SINGLE__ = 0
 __PAIR__ = 1
 __TRACTOR__ = 2
 __SUSPECT__ = 3
+__DISCARD__ = 4
+__WRONG__ = 5
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 15: 11, 17: 12}
@@ -428,5 +430,7 @@ __all__ = [
     '__PAIR__',
     '__TRACTOR__' ,
     '__SUSPECT__',
+    '__DISCARD__',
+    '__WRONG__',
     '__HAND_CARD_NUM__',
 ]

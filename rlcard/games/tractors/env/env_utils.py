@@ -17,12 +17,12 @@ def _format_observation(obs, device):
     device = torch.device(device)
     
     z = torch.from_numpy(obs['z']).to(device)
-    x_no_action = torch.from_numpy(obs['x_no_action']).to(device)
+    x = torch.from_numpy(obs['x']).to(device)
     legal_actions = torch.from_numpy(obs['legal_actions'])
     
     obs = {
            'z': z,
-           'x': x_no_action,
+           'x': x,
            }
     return position, obs, legal_actions
 
@@ -32,41 +32,33 @@ class Environment:
         """
         self.env = env
         self.device = device
-        self.episode_return = None
 
     def initial(self, model, device, flags=None):
         obs = self.env.reset(model, device, flags=flags)
         initial_position, initial_obs, legal_actions = _format_observation(obs, self.device)
         
-        self.episode_return = torch.zeros(1, 1)
         
         # initial_done = torch.ones(1, 1, dtype=torch.bool)
         return initial_position, initial_obs, dict(
             done=False,
             legal_actions=legal_actions,
-            episode_return=self.episode_return,
         )
 
     def step(self, action, model, device, flags=None):
-        obs, reward, done, = self.env.step(action)
+        obs,  done, = self.env.step(action)
 
-        self.episode_return = reward
-        episode_return = self.episode_return
-        
-        if done:
-            obs = self.env.reset(model, device, flags=flags)
-            self.episode_return = torch.zeros(1, 1)
-        
-        position, obs, legal_actions = _format_observation(obs, self.device)
+        if obs:
+            position, obs, legal_actions = _format_observation(obs, self.device)
         # reward = torch.tensor(reward).view(1, 1)
         done = torch.tensor(done).view(1, 1)
 
         return position, obs, dict(
             done=done,
             legal_actions=legal_actions,
-            episode_return=episode_return,
         )
     
-
+    def reset(self):
+        return self.env.reset()
+        
     def close(self):
         self.env.close()

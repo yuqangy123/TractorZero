@@ -73,49 +73,66 @@ class Env:
             # }
         return obs, done
 
-    def _get_reward(self):
+    def _get_step_reward(self):
         banker = self._env.getBanker()
         bid_score = self._env.getLeastBidScore()
         round_score = self._env.getLastRoundScore()
-        game_score = self._env.getTotalScore()
-        last_game_score = game_score - round_score
+        game_score = self._env.getGameScore()
         play_rights = self._env.getFristPlaySeat()
 
-        base_reward = round_score/100.0
-        rule_mult = 1 if banker == play_rights else -1
-        
-        
+        r = round_score/100.0#4*K + 4*10 + 4*5
+        if 0.0 < round_score:
+            if game_score <= bid_score:
+                pro_score = (game_score/bid_score) ** 1.3
+            else:
+                pro_score = (game_score/200.) ** 0.7
+                
+            r += pro_score*0.5
+        else:
+            r = -self._env.getPlayerLeftHandCards(banker)/__HAND_CARD_NUM__ * 0.5
+            
+        mult = -1 if banker == play_rights else 1
         
         reward = {}
-        reward['banker'].append(mult*reward)
-        reward['banker_down'].append(-mult*reward)
-        reward['banker_up'].append(-mult*reward)
+        reward['banker'].append(r * mult)
+        reward['banker_down'].append(r * mult)
+        reward['banker_up'].append(r * mult)
         
         return reward
 
-    def _get_reward_bid(self, pos):
-        winner = self._bid_winner
-        bomb_num = self._game_bomb_num + 1 if self._env.spring else self._game_bomb_num
-        bid_count = self._env.bid_count
-        multiply = 1 if '&' in winner else 2
-        _multiply = 2 if multiply == 1 else 1
-        if pos in winner:
-            if bomb_num == 0:
-                r = bid_count
-            elif bomb_num == 1:
-                r = bid_count * (1 + bomb_num)
-            else:
-                r = bid_count * (2 + 2 * (bomb_num - 1))
-            return r * multiply / 24
+    def _get_reward(self):
+        banker = self._env.getBanker()
+        bid_score = self._env.getLeastBidScore()#叫分
+        game_score = self._env.getGameScore()#局内得分
+        
+        banker_win = bid_score > game_score
+        
+        public_score = 0
+        #[16, 17, 18, 19, 36, 37, 38, 39, 48, 49, 50, 51]
+        for c in self._env.getPublicCards():
+            if c in [16, 17, 18, 19, 16+54, 17+54, 18+54, 19+54]:public_score += 5
+            elif c in [36, 37, 38, 39, 36+54, 37+54, 38+54, 39+54]:public_score += 10
+            elif c in [48, 49, 50, 51, 48+54, 49+54, 50+54, 51+54]:public_score += 10
+        
+        mult = 1. if banker_win else -1.
+        
+        reward = {}
+        reward['cover'] = public_score/100. * mult
+        reward['bid'] = (bid_score - game_score)/bid_score
+        
+        if banker_win:
+            end_score = self._env.getEndingScore(banker)
+            reward['banker'] = end_score
+            reward['banker_down'] = -end_score/2.
+            reward['banker_up'] = -end_score/2.
         else:
-            if bomb_num == 0:
-                r = bid_count
-            elif bomb_num == 1:
-                r = bid_count * (1 + bomb_num)
-            else:
-                r = bid_count * (2 + 2 * (bomb_num - 1))
-            return -r * _multiply / 24
-
+            end_score = self._env.getEndingScore((banker+1)%__PLAYER_COUNT__)
+            reward['banker'] = -end_score
+            reward['banker_down'] = end_score
+            reward['banker_up'] = end_score
+        
+        return reward
+        
     @property
     def _game_infoset(self):
         return self._env.game_infoset
@@ -230,9 +247,12 @@ def _get_banker_obs_resnet(infoset):
     play_rights = _get_one_hot_array(infoset.play_rights_seat, 3)
     
     
-    legal_actions = []
-    for j, action in enumerate(infoset.legal_actions):
-        legal_actions.append(cards2matrix(action), level=level, major=major)
+    legal_actions = [[] for _ in range(__WRONG__)]
+    for k, actions in infoset.legal_actions.items():
+        for act in actions:
+            legal_actions[k].append(cards2matrix(act), level=level, major=major)
+    legal_actions = np.array(legal_actions)
+        
     
     #剩余牌张数
     banker_num_cards_left = _get_one_hot_array(
@@ -294,7 +314,7 @@ def _get_banker_obs_resnet(infoset):
     # z_batch = np.concatenate((my_action_batch, _z_batch), axis=1)
     obs = {
         'position': infoset.player_position,
-        'x_no_action': x_no_action.astype(np.int8),
+        'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
         'legal_actions': legal_actions,
     }
@@ -389,7 +409,7 @@ def _get_idler_obs_resnet(infoset):
     # z_batch = np.concatenate((my_action_batch, _z_batch), axis=1)
     obs = {
         'position': infoset.player_position,
-        'x_no_action': x_no_action.astype(np.int8),
+        'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
         'legal_actions': legal_actions,
     }
@@ -403,14 +423,18 @@ def _get_bid_obs_resnet(infoset):
     
     legal_actions = _get_one_hot_array(infoset.mask_bid_score//5, 40)
     
+    x_no_action = np.vstack((
+                    my_handcards,# 2*4*15 = 120
+                  ))
+    
     z = np.hstack((
-                    my_handcards,
                     curr_bid_score,
                     mask_bid_score,
                 ))
 
     obs = {
         'position': infoset.player_position,
+        'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
         'legal_actions': legal_actions,
     }
@@ -434,7 +458,7 @@ def _get_cover_obs_resnet(infoset):
 
     obs = {
         'position': infoset.player_position,
-        'x_no_action': x_no_action.astype(np.int8),
+        'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
     }
     return obs
