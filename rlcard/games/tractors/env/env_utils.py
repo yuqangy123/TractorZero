@@ -48,6 +48,8 @@ class Environment:
     def step(self, action, model, device, flags=None):
         obs,  done, = self.env.step(action)
 
+        legal_actions = None
+        mask_action_type = None
         if obs:
             position, obs, legal_actions = _format_observation(obs, self.device)
         # reward = torch.tensor(reward).view(1, 1)
@@ -56,6 +58,7 @@ class Environment:
         return position, obs, dict(
             done=done,
             legal_actions=legal_actions,
+            mask_action_type=mask_action_type,
             stage = self.env._stage,
         )
     

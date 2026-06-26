@@ -118,7 +118,8 @@ class Env:
         
         reward = {}
         reward['cover'] = public_score/100. * mult
-        reward['bid'] = (bid_score - game_score)/bid_score
+        bid_diff_ratio = (bid_score - game_score) / bid_score
+        reward['bid'] = np.clip(bid_diff_ratio, -1.0, 1.0)
         
         if banker_win:
             end_score = self._env.getEndingScore(banker)
@@ -214,6 +215,13 @@ def _get_one_hot_array(num_left_cards, max_num_cards):
     one_hot = np.zeros(max_num_cards)
     if num_left_cards > 0:
         one_hot[num_left_cards - 1] = 1
+
+    return one_hot
+
+def _get_full_hot_array(num_left_cards, max_num_cards):
+    one_hot = np.zeros(max_num_cards)
+    if num_left_cards > 0:
+        one_hot[:num_left_cards] = 1
 
     return one_hot
 
@@ -415,20 +423,19 @@ def _get_idler_obs_resnet(infoset):
     }
     return obs
 
-
 def _get_bid_obs_resnet(infoset):
     my_handcards = cards2matrix(infoset.player_hand_cards)
-    curr_bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
+    last_bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
     mask_bid_score = _get_one_hot_array(infoset.mask_bid_score//5, 40)
     
-    legal_actions = _get_one_hot_array(infoset.mask_bid_score//5, 40)
+    legal_actions = _get_full_hot_array(infoset.mask_bid_score//5, 40)
     
     x_no_action = np.vstack((
                     my_handcards,# 2*4*15 = 120
                   ))
     
     z = np.hstack((
-                    curr_bid_score,
+                    last_bid_score,
                     mask_bid_score,
                 ))
 
@@ -444,7 +451,8 @@ def _get_cover_obs_resnet(infoset):
     bid_score = infoset.bid_score
     my_handcards = cards2matrix(infoset.player_hand_cards)
     
-
+    legal_actions = cards2matrix(infoset.player_hand_cards)
+    
     #分数归一化
     bid_score = _get_one_hot_array(bid_score//5, 40)
     
@@ -460,5 +468,6 @@ def _get_cover_obs_resnet(infoset):
         'position': infoset.player_position,
         'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
+        'legal_actions': legal_actions,
     }
     return obs
