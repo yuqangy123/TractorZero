@@ -15,6 +15,8 @@ from rlcard.games.tractors.models import Model
 
 from rlcard.games.tractors.train_act import *
 
+from torch.utils.tensorboard import SummaryWriter
+
 mean_episode_return_buf = {p:deque(maxlen=100) for p in ['landlord', 'landlord_up', 'landlord_down', 'bidding']}
 
 
@@ -179,11 +181,7 @@ def train(flags):
     if not flags.actor_device_cpu or flags.training_device != 'cpu':
         if not torch.cuda.is_available():
             raise AssertionError("CUDA not available. If you have GPUs, please specify the ID after `--gpu_devices`. Otherwise, please train with CPU with `python3 train.py --actor_device_cpu --training_device cpu`")
-    plogger = FileWriter(
-        xpid=flags.xpid,
-        xp_args=flags.__dict__,
-        rootdir=flags.savedir,
-    )
+    
     checkpointpath = os.path.expandvars(
         os.path.expanduser('%s/%s/%s' % (flags.savedir, flags.xpid, 'model.tar')))
 
@@ -204,10 +202,12 @@ def train(flags):
         model.eval()
         models[device] = model
 
+    positions = ['banker', 'banker_down', 'banker_up', 'bid', 'cover']
+    
     # Initialize queues
     actor_processes = []
     ctx = mp.get_context('spawn')
-    batch_queues = {"landlord": ctx.SimpleQueue(), "landlord_up": ctx.SimpleQueue(), "landlord_down": ctx.SimpleQueue(), "bidding": ctx.SimpleQueue()}
+    batch_queues = {position: ctx.SimpleQueue() for position in positions}
 
     # Learner model for training
     learner_model = Model(device=flags.training_device)
@@ -216,25 +216,23 @@ def train(flags):
     optimizers = create_optimizers(flags, learner_model)
 
     # Stat Keys
-    stat_keys = [
-        'mean_episode_return_landlord',
-        'loss_landlord',
-        'mean_episode_return_landlord_up',
-        'loss_landlord_up',
-        'mean_episode_return_landlord_down',
-        'loss_landlord_down',
-        'mean_episode_return_bidding',
-        'loss_bidding',
-    ]
+    stat_keys = []
+    for position in positions:
+        stat_keys += [
+            'mean_episode_return_' + position,
+            'loss_' + position,
+        ]
+    
     frames, stats = 0, {k: 0 for k in stat_keys}
-    position_frames = {'landlord':0, 'landlord_up':0, 'landlord_down':0, 'bidding': 0}
+    position_frames = {position:0 for position in positions}
+    position_train_frame = {position:0 for position in positions}
 
     # Load models if any
     if flags.load_model and os.path.exists(checkpointpath):
         checkpoint_states = torch.load(
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
-        for k in ['landlord', 'landlord_up', 'landlord_down', 'bidding']: # ['landlord', 'landlord_up', 'landlord_down']
+        for k in positions:
             learner_model.get_model(k).load_state_dict(checkpoint_states["model_state_dict"][k])
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
@@ -249,7 +247,7 @@ def train(flags):
         position_frames = checkpoint_states["position_frames"]
         if not "bidding" in position_frames:
             position_frames.update({"bidding": 0})
-        log.info(f"Resuming preempted job, current stats:\n{stats}")
+        print(f"Resuming preempted job, current stats:\n{stats}")
 
     # Starting actor processes
     for device in device_iterator:
@@ -262,32 +260,62 @@ def train(flags):
             actor.start()
             actor_processes.append(actor)
 
+    learn_calls = {'bid': learn_bid, 'cover': learn_cover, 'banker': learn_play, 'banker_down': learn_play, 'banker_up': learn_play}
+    get_batch_calls = {'bid': get_batch_bid, 'cover': get_batch_cover, 'banker': get_batch_play, 'banker_down': get_batch_play, 'banker_up': get_batch_play}
+    
     def batch_and_learn(i, device, position, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
-        nonlocal frames, position_frames, stats
+        nonlocal frames, position_frames, position_train_frame, stats
+        # pid = threading.get_ident()
+        
         while frames < flags.total_frames:
-            batch = get_batch(batch_queues, position, flags, local_lock)
-            _stats = learn(position, models, learner_model.get_model(position), batch, 
-                optimizers[position], flags, position_lock)
+            # start_t = __timer()
+            batch = get_batch_calls[position](batch_queues[device][position], position, flags, local_lock)
+            # a_t = __timer()
+            # if 'landlord' == position:#test code 不训练地主
+            #     continue
+            
+            _stats = learn_calls[position](position, models, learner_model.get_model(position), batch,
+                           optimizers[position], flags, position_lock)
+            # b_t = __timer()
+            # print(f'batch_learn({pid}):{start_t:.4f}, {a_t:.4f}, {b_t:.4f}, use time:{(b_t-a_t):.4f}')
             with lock:
                 for k in _stats:
                     stats[k] = _stats[k]
                 to_log = dict(frames=frames)
-                to_log.update({k: stats[k] for k in stat_keys})
-                plogger.log(to_log)
+                to_log.update({k: stats[k] for k in stat_keys if k in stats})
                 frames += T * B
                 position_frames[position] += T * B
+                
+                #模型参数变化
+                position_train_frame[position] += 1
+                if position_train_frame[position]%1000 == 0:
+                    save_position = position
+                    save_position_frames = position_frames[save_position]
+                    def write_model_param_thread():
+                        writer = SummaryWriter(f'{flags.savelog}/mahjong_parameters/{save_position}')
+                        learn_model = learner_model.get_model(save_position)
+                        for name, param in learn_model.named_parameters():
+                            # 记录权重
+                            writer.add_histogram(f'weights/{name}', param.data, save_position_frames)
+                            # 记录梯度（如果存在）
+                            if param.grad is not None:
+                                writer.add_histogram(f'gradients/{name}', param.grad, save_position_frames)
+                    threading.Thread(
+                        target=write_model_param_thread, name='write_model_param',
+                        args=()).start()
 
 
     threads = []
     locks = {}
     for device in device_iterator:
-        locks[device] = {'landlord': threading.Lock(), 'landlord_up': threading.Lock(), 'landlord_down': threading.Lock(), 'bidding': threading.Lock()}
-    position_locks = {'landlord': threading.Lock(), 'landlord_up': threading.Lock(), 'landlord_down': threading.Lock(), 'bidding': threading.Lock()}
+        for position in positions:
+            locks[device] = {position: threading.Lock() for position in positions}#'landlord': threading.Lock(), 'landlord_up': threading.Lock(), 'landlord_down': threading.Lock(), 'bidding': threading.Lock()}
+    position_locks = {position: threading.Lock() for position in positions}#{'landlord': threading.Lock(), 'landlord_up': threading.Lock(), 'landlord_down': threading.Lock(), 'bidding': threading.Lock()}
 
     for device in device_iterator:
         for i in range(flags.num_threads):
-            for position in ['landlord', 'landlord_up', 'landlord_down', 'bidding']:
+            for position in positions:
                 thread = threading.Thread(
                     target=batch_and_learn, name='batch-and-learn-%d' % i, args=(i,device,position,locks[device][position],position_locks[position]))
                 thread.start()
@@ -296,7 +324,7 @@ def train(flags):
     def checkpoint(frames):
         if flags.disable_checkpoint:
             return
-        log.info('Saving checkpoint to %s', checkpointpath)
+        print('Saving checkpoint to %s', checkpointpath)
         _models = learner_model.get_models()
         torch.save({
             'model_state_dict': {k: _models[k].state_dict() for k in _models},  # {{"general": _models["landlord"].state_dict()}
@@ -308,7 +336,7 @@ def train(flags):
         }, checkpointpath)
 
         # Save the weights for evaluation purpose
-        for position in ['landlord', 'landlord_up', 'landlord_down', 'bidding']: # ['landlord', 'landlord_up', 'landlord_down']
+        for position in positions: # ['landlord', 'landlord_up', 'landlord_down']
             model_weights_dir = os.path.expandvars(os.path.expanduser(
                 '%s/%s/%s' % (flags.savedir, flags.xpid, "general_"+position+'_'+str(frames)+'.ckpt')))
             torch.save(learner_model.get_model(position).state_dict(), model_weights_dir)
@@ -335,16 +363,20 @@ def train(flags):
             fps_avg = np.mean(fps_log)
 
             position_fps = {k:(position_frames[k]-position_start_frames[k])/(end_time-start_time) for k in position_frames}
-            log.info('After %i (L:%i U:%i D:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f U:%.1f D:%.1f) Stats:\n%s',
+            print('After %i (L:%i D:%i U:%i B:%i C:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f D:%.1f U:%.1f B:%.1f C:%.1f) Stats:\n%s',
                      frames,
-                     position_frames['landlord'],
-                     position_frames['landlord_up'],
-                     position_frames['landlord_down'],
+                     position_frames['banker'],
+                     position_frames['banker_down'],
+                     position_frames['banker_up'],
+                     position_frames['bid'],
+                     position_frames['cover'],
                      fps,
                      fps_avg,
-                     position_fps['landlord'],
-                     position_fps['landlord_up'],
-                     position_fps['landlord_down'],
+                     position_fps['banker'],
+                     position_fps['banker_down'],
+                     position_fps['banker_up'],
+                     position_fps['bid'],
+                     position_fps['cover'],
                      pprint.pformat(stats))
 
     except KeyboardInterrupt:
@@ -352,7 +384,6 @@ def train(flags):
     else:
         for thread in threads:
             thread.join()
-        log.info('Learning finished after %d frames.', frames)
+        print('Learning finished after %d frames.', frames)
 
     checkpoint(frames)
-    plogger.close()
