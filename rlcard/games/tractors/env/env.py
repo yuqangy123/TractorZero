@@ -117,9 +117,15 @@ class Env:
         mult = 1. if banker_win else -1.
         
         reward = {}
-        reward['cover'] = public_score/100. * mult
-        bid_diff_ratio = (bid_score - game_score) / bid_score
-        reward['bid'] = np.clip(bid_diff_ratio, -1.0, 1.0)
+        #bid和cover都是以banker为actor
+        reward['cover_public_score'] = public_score/100. * mult
+        reward['cover'] = 1.0 if True == banker_win else -1.0
+        
+        if bid_score == game_score:
+            reward['bid'] = 5./bid_score
+        else:
+            bid_diff_ratio = (bid_score - game_score) / bid_score
+            reward['bid'] = np.clip(bid_diff_ratio, -1.0, 1.0)
         
         if banker_win:
             end_score = self._env.getEndingScore(banker)

@@ -29,7 +29,7 @@ def get_batch_bid(b_queues, flags, lock):
         buffer.append(b_queue.get())
     batch = {
         key: torch.stack([m[key] for m in buffer], dim=1)
-        for key in ["bid_return", "bid_action_mask", "bid_action", "bid_suit",
+        for key in ["bid_return", "bid_action_mask", "bid_score", "bid_suit",
                     "obs_z", "obs_x"]
     }
     del buffer
@@ -43,7 +43,7 @@ def get_batch_cover(b_queues, flags, lock):
         buffer.append(b_queue.get())
     batch = {
         key: torch.stack([m[key] for m in buffer], dim=1)
-        for key in ["cover_return", "cover_action_mask", "cover_action",
+        for key in ["cover_public_score", "cover_return", "cover_action_mask", "cover_action",
                     "obs_z", "obs_x"]
     }
     del buffer
@@ -92,11 +92,12 @@ def act(i, device, batch_queues, model, flags):
         
         bid_return_buf = {"bid": []}
         bid_action_mask_buf = {"bid": []}
-        bid_action_buf = {"bid": []}
+        bid_score_buf = {"bid": []}
         bid_suit_buf = {"bid": []}
         
+        cover_public_score_buf = {"cover": []}
         cover_return_buf = {"cover": []}
-        cover_action_mask_buf = {"bid": []}
+        cover_action_mask_buf = {"cover": []}
         cover_action_buf = {"cover": []}
         
         size = {p: 0 for p in positions}
@@ -122,7 +123,7 @@ def act(i, device, batch_queues, model, flags):
                     action = agent_output['action']
                     if position == 'bid':
                         bid_action_mask_buf.append(env_output['legal_actions'][:])
-                        bid_action_buf.append(action[:])
+                        bid_score_buf.append(action[:])
                         bid_suit_buf.append(agent_output['suit'])
                         action = [action, agent_output['suit']]
                         
@@ -155,8 +156,8 @@ def act(i, device, batch_queues, model, flags):
                             target_wp_buf[p].extend([wp_return for _ in range(diff)])
                             
                     bid_return_buf.append(game_reward['bid'])
+                    cover_public_score_buf.append(game_reward['cover_public_score'])
                     cover_return_buf.append(game_reward['cover'])
-                    
                     break
 
             for p in ['banker', 'banker_up', 'banker_down']:
@@ -194,6 +195,8 @@ def act(i, device, batch_queues, model, flags):
                     batch_queues[p].put({
                         "cover_action_mask": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in cover_action_mask_buf[p][:T]]),
+                        "cover_public_score": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_public_score_buf[p][:T]]),
                         "cover_return": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in cover_return_buf[p][:T]]),
                         "cover_action": torch.stack(
@@ -205,6 +208,7 @@ def act(i, device, batch_queues, model, flags):
                     })
                     
                     cover_action_mask_buf[p] = cover_action_mask_buf[p][T:]
+                    cover_public_score_buf[p] = cover_public_score_buf[p][T:]
                     cover_return_buf[p] = cover_return_buf[p][T:]
                     cover_action_buf[p] = cover_action_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
@@ -218,8 +222,8 @@ def act(i, device, batch_queues, model, flags):
                             [torch.tensor(ndarr, device="cpu") for ndarr in bid_action_mask_buf[p][:T]]),
                         "bid_return": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in bid_return_buf[p][:T]]),
-                        "bid_action": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_action_buf[p][:T]]),
+                        "bid_score": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_score_buf[p][:T]]),
                         "bid_suit": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in bid_suit_buf[p][:T]]),
                         "obs_z": 
@@ -230,7 +234,7 @@ def act(i, device, batch_queues, model, flags):
                     
                     bid_action_mask_buf[p] = bid_action_mask_buf[p][T:]
                     bid_return_buf[p] = bid_return_buf[p][T:]
-                    bid_action_buf[p] = bid_action_buf[p][T:]
+                    bid_score_buf[p] = bid_score_buf[p][T:]
                     bid_suit_buf[p] = bid_suit_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
                     obs_x_buf[p] = obs_x_buf[p][T:]

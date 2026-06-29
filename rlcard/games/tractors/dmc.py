@@ -40,9 +40,9 @@ def learn_bid(position, actor_models, model, batch, optimizer, flags, lock):
     obs_x = torch.flatten(obs_x, 0, 1).to(device)
     obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
     
-    bid_return = torch.flatten(batch['bid_return'].to(device), 0, 1)
+    bid_target = torch.flatten(batch['bid_return'].to(device), 0, 1)
     bid_action_mask = torch.flatten(batch['bid_action_mask'].to(device), 0, 1)
-    bid_action = torch.flatten(batch['bid_action'].to(device), 0, 1)
+    bid_score = torch.flatten(batch['bid_score'].to(device), 0, 1)
     bid_suit = torch.flatten(batch['bid_suit'].to(device), 0, 1)
     
     with lock:
@@ -50,28 +50,16 @@ def learn_bid(position, actor_models, model, batch, optimizer, flags, lock):
         output = model.learn_bid('bid', obs_z, obs_x, bid_action_mask)
         values = output['values']
         score, suit = values[0], values[1]
-        score_logits = score.gather(1, bid_action.unsqueeze(1)).squeeze(1)
-        suit_logits = suit.gather(1, bid_suit.unsqueeze(1)).squeeze(1)
+        score = score.gather(1, bid_score.unsqueeze(1)).squeeze(1)
+        suit = suit.gather(1, bid_suit.unsqueeze(1)).squeeze(1)
         
-        #本局胜利
-        if bid_return > 0:
-            
-        else:
-            
+        #叫分，花色分数
+        loss_score = compute_loss(score, bid_target)
+        suit_score = compute_loss(suit, bid_target)
+        loss = loss_score + suit_score
         
-        
-        win_rate, win, lose = model.forward_learn(obs_z, obs_x, [play_type, play_type_mask, play_action])['values']
-
-        if position in ["landlord", "landlord_up", "landlord_down"]:
-            loss1 = compute_loss(win_rate, target_wp)
-            l_w = compute_loss_(win, target_adp) * (1. + target_wp) / 2.
-            l_l = compute_loss_(lose, target_adp) * (1. - target_wp) / 2.
-            loss2 = l_w.mean() + l_l.mean()
-            loss = loss1 + loss2
-            
-
         stats = {
-            'mean_episode_return_' + position: sum(mean_episode_return_buf[position])/len(mean_episode_return_buf[position]),
+            'mean_episode_return_' + position: bid_target.mean().item(),
             'loss_' + position: loss.item(),
         }
         
@@ -84,6 +72,47 @@ def learn_bid(position, actor_models, model, batch, optimizer, flags, lock):
             actor_model.get_model(position).load_state_dict(model.state_dict())
         return stats
 
+def learn_cover(position, actor_models, model, batch, optimizer, flags, lock):
+    """Performs a learning (optimization) step."""
+    print("Learn", position)
+    if flags.training_device != "cpu":
+        device = torch.device('cuda:'+str(flags.training_device))
+    else:
+        device = torch.device('cpu')
+    
+    obs_x = batch["obs_x"]
+    obs_x = torch.flatten(obs_x, 0, 1).to(device)
+    obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
+    
+    cover_return = torch.flatten(batch['cover_return'].to(device), 0, 1)# 1 or -1
+    cover_action_mask = torch.flatten(batch['cover_action_mask'].to(device), 0, 1)
+    cover_cards_mtx_target = torch.flatten(batch['cover_action'].to(device), 0, 1)
+    cover_public_score = torch.flatten(batch['cover_public_score'].to(device), 0, 1) # -1 <= x <= 1
+    
+    with lock:
+        model.to(device)
+        output = model.learn_bid('cover', obs_z, obs_x, cover_action_mask)
+        cover_cards_mtx = output['values'][0]
+        
+        cover_public_score_ = cover_public_score * cover_return
+        cover_cards_mtx_target_ = cover_cards_mtx_target * cover_public_score_
+        
+        loss = compute_loss_(cover_cards_mtx, cover_cards_mtx_target_)
+        
+        stats = {
+            'mean_episode_return_' + position: cover_public_score_.item(),
+            'loss_' + position: loss.item(),
+        }
+        
+        optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), flags.max_grad_norm)
+        optimizer.step()
+        
+        for actor_model in actor_models.values():
+            actor_model.get_model(position).load_state_dict(model.state_dict())
+        return stats
+    
 def learn_play(position, actor_models, model, batch, optimizer, flags, lock):
     """Performs a learning (optimization) step."""
     print("Learn", position)
@@ -92,15 +121,15 @@ def learn_play(position, actor_models, model, batch, optimizer, flags, lock):
     else:
         device = torch.device('cpu')
     
-    obs_x = batch["x"]
+    obs_x = batch["obs_x"]
     obs_x = torch.flatten(obs_x, 0, 1).to(device)
-    obs_z = torch.flatten(batch['z'].to(device), 0, 1).float()
+    obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
     
-    target_adp = torch.flatten(batch['target_adp'].to(device), 0, 1)
+    target_adp = torch.flatten(batch['target_adp'].to(device), 0, 1)#得分
     target_wp = torch.flatten(batch['target_wp'].to(device), 0, 1)
     
-    play_type = torch.flatten(batch['play_type'].to(device), 0, 1)
-    play_type_mask = torch.flatten(batch['play_type_mask'].to(device), 0, 1)
+    play_action_type = torch.flatten(batch['play_action_type'].to(device), 0, 1)
+    play_action_type_mask = torch.flatten(batch['play_action_type_mask'].to(device), 0, 1)
     play_action = torch.flatten(batch['play_action'].to(device), 0, 1)
     
     with lock:
@@ -117,14 +146,13 @@ def learn_play(position, actor_models, model, batch, optimizer, flags, lock):
         #                 state[k] = v.to(device)
         #                 print('state[k] to: ', device)
         model.to(device)
-        win_rate, win, lose = model.forward_learn(obs_z, obs_x, [play_type, play_type_mask, play_action])['values']
-
-        if position in ["landlord", "landlord_up", "landlord_down"]:
-            loss1 = compute_loss(win_rate, target_wp)
-            l_w = compute_loss_(win, target_adp) * (1. + target_wp) / 2.
-            l_l = compute_loss_(lose, target_adp) * (1. - target_wp) / 2.
-            loss2 = l_w.mean() + l_l.mean()
-            loss = loss1 + loss2
+        #learn_action_play(self, position, z, x, action_type, legal_actions)
+        win_rate, win, lose = model.learn_play('position', obs_z, obs_x, play_action_type, play_action)['values']
+        loss1 = compute_loss(win_rate, target_wp)
+        l_w = compute_loss_(win, target_adp) * (1. + target_wp) / 2.
+        l_l = compute_loss_(lose, target_adp) * (1. - target_wp) / 2.
+        loss2 = l_w.mean() + l_l.mean()
+        loss = loss1 + loss2
             
 
         stats = {

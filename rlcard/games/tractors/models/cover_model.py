@@ -50,7 +50,7 @@ class CoverModel(nn.Module):
                 top_k_values, top_k_indices = t.topk(out, k=8, dim=1)
                 action = t.zeros_like(out)
                 action.scatter_(1, top_k_indices, 1.0)
-                action.reshape(mask_shape)
+                # action.reshape(mask_shape)
             # return dict(score=y_score_out, y_suit=y_suit_out, score_values=y_score, suit_values=y_suit)
             if return_value: 
                 return dict(action = action, values = (out, top_k_indices))
