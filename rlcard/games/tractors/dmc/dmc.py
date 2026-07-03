@@ -150,7 +150,7 @@ def learn_play(position, actor_models, model, batch, optimizer, flags, lock):
         #                 print('state[k] to: ', device)
         model.to(device)
         #learn_action_play(self, position, z, x, action_type, legal_actions)
-        win_rate, win, lose = model.learn_play('position', obs_z, obs_x, play_action_type, play_action)['values']
+        win_rate, win, lose = model.learn_action_play(position, obs_z, obs_x, play_action_type, play_action)['values']
         loss1 = compute_loss(win_rate, target_wp)
         l_w = compute_loss_(win, target_adp) * (1. + target_wp) / 2.
         l_l = compute_loss_(lose, target_adp) * (1. - target_wp) / 2.

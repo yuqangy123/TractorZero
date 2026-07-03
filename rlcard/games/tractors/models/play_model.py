@@ -330,8 +330,8 @@ class BankerModel(nn.Module):
         x_feat = self.cards_encoder(x)
         #连接x与z，送入action_type_net
         x_feat = x_feat.flatten(1, 2)
-        z_feat = [z]*self.num_action_type
-        t_feat = z_feat + x_feat
+        z_expanded = z.unsqueeze(0).expand(self.num_action_type, -1, -1)
+        t_feat = [z_expanded[i] for i in range(self.num_action_type)] + [x_feat]
         output = t.cat(t_feat, dim=-1)        
         logits = self.action_type_net(output)
     
@@ -348,6 +348,7 @@ class BankerModel(nn.Module):
 
     def forward_act(self, z, x, return_value=False, flags=None):
         x_feat = self.cards_encoder(x)
+        output = t.cat([z, z, z, z, x_feat], dim=-1)
         output = t.cat([z, z, z, z, x_feat], dim=-1)
         
         logits = self.action_q_net(output)
@@ -671,8 +672,8 @@ class IdlerModel(nn.Module):
         x_feat = self.cards_encoder(x)
         #连接x与z，送入action_type_net
         x_feat = x_feat.flatten(1, 2)
-        z_feat = [z]*self.num_action_type
-        t_feat = z_feat + x_feat
+        z_expanded = z.unsqueeze(0).expand(self.num_action_type, -1, -1)
+        t_feat = [z_expanded[i] for i in range(self.num_action_type)] + [x_feat]
         output = t.cat(t_feat, dim=-1)
         
         logits = self.action_type_net(output)

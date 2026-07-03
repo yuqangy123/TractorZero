@@ -81,7 +81,7 @@ class TractorsActor():
         fixed_cards, display_cards,_,_,_ = self.__models['player'].act(obs_x, actions_fixed, actions_discard, discard_num, team)
 
         out_cards = fixed_cards + display_cards
-        out_cards = matrix2card(out_cards)
+        out_cards = matrix2cards(out_cards)
         return out_cards
 
     def predictCard(self, input_x, isTrain=None):

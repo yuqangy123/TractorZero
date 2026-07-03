@@ -48,12 +48,12 @@ class Model:
             action_tp_mask = [len(actions) for actions in legal_actions]
             # 若有多个牌型可选，先预测出牌牌型
             if sum(action_tp_mask) > 1:
-                tp_output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self.device), flags=flags)
+                tp_output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self._device), flags=flags)
                 action_type = tp_output['action']
             else:
                 action_type = next(i for i, count in enumerate(action_tp_mask) if count > 0)
             
-            action_tp_mask = torch.zeros(__WRONG__).to(self.device)
+            action_tp_mask = torch.zeros(__WRONG__).to(self._device)
             action_tp_mask[action_type] = 1.0
             _z = torch.cat([z, action_tp_mask], dim=1)
             
@@ -62,15 +62,15 @@ class Model:
                 len(legal_actions[action_type]), axis=0)
             x_batch = np.concatenate((legal_actions[action_type], _x_batch), axis=1)
             
-            output = model.forward_act(_z, x_batch, flags=flags)['action']
-            return output
+            output = model.forward_act(_z, x_batch, flags=flags)
+            return dict(action_type=action_type, action=output['action'])
         
         elif position == 'bid':
             output = model.forward(z, x, legal_actions, flags=flags)
             return output
             
         elif position == 'cover':
-            output = model.forward(z, x, legal_actions, flags=flags)['action']
+            output = model.forward(z, x, legal_actions, flags=flags)
             return output
         
         else:
@@ -80,14 +80,14 @@ class Model:
     def learn_action_tp(self, position, z, x, action_tp_mask):
         if position in ['banker', 'banker_down', 'banker_up']:
             model = self.models[position]
-            output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self.device), return_value=True)
+            output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self._device), return_value=True)
             return output
            
     
     def learn_action_play(self, position, z, x, action_type, legal_actions):
         if position in ['banker', 'banker_down', 'banker_up']:
             model = self.models[position]
-            action_tp_mask = torch.zeros(__WRONG__).to(self.device)
+            action_tp_mask = torch.zeros(__WRONG__).to(self._device)
             action_tp_mask[action_type] = 1.0
             _z = torch.cat([z, action_tp_mask], dim=1)
             

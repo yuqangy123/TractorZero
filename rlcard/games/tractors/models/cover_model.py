@@ -16,10 +16,11 @@ class CoverModel(nn.Module):
                                         in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         # self.lstm = nn.LSTM(162, 128, batch_first=True)
         
-        self.dense1 = nn.Linear(373 + 128, 512)
-        self.dense2 = nn.Linear(512, 512)
-        self.dense3 = nn.Linear(512, 512)
-        self.dense4 = nn.Linear(512, 120)
+        self.dense1 = nn.Linear(672, 1024)
+        self.dense2 = nn.Linear(1024, 1024)
+        self.dense3 = nn.Linear(1024, 512)
+        self.dense4 = nn.Linear(512, 512)
+        self.dense5 = nn.Linear(512, 120)
 
     def forward(self, obs_z, obs_x, mask, return_value=False, flags=None):
         x = self.resnet(obs_x)
@@ -29,6 +30,7 @@ class CoverModel(nn.Module):
         x = F.leaky_relu_(self.dense2(x))
         x = F.leaky_relu_(self.dense3(x))
         x = F.leaky_relu_(self.dense4(x))
+        x = F.leaky_relu_(self.dense5(x))
         
         
         if return_value: 
@@ -45,7 +47,7 @@ class CoverModel(nn.Module):
             
             else:
                 mask_shape = mask.shape
-                x = x.reshape(x[0], 2, 4, 15)
+                x = x.reshape((x.shape[0], 2, 4, 15))
                 out = x * mask
                 out = out.reshape(out.shape[0], -1)
                 top_k_values, top_k_indices = t.topk(out, k=8, dim=1)

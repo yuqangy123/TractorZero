@@ -134,7 +134,7 @@ class tractorGame():
             self.Major = [suit + level for suit in __SUITSET__] + self.Major
         
         #数字牌
-        self.MajorCards = self.Pokers2Num(self.Major, range(0, 108))
+        self.MajorCards = self.Pokers2Num(self.Major, list(range(0, 108)))
         
         self.pointorder.remove(level)
     ###############################################################
@@ -2047,9 +2047,9 @@ class tractorGame():
                         self.globalInfo["playerpos"] = self.globalInfo['bid_seq'][bid_win][0]
                         self.globalInfo['bidsseat'] = self.globalInfo["playerpos"]
                         self.globalInfo['bidscore'] = self.globalInfo['bid_seq'][bid_win][1]
-                        self.player_hand_cards.extend(self.globalInfo["publiccard"])
+                        self.player_hand_cards[self.globalInfo['bidsseat']].extend(self.globalInfo["publiccard"])
                         self.globalInfo["stage"] = "cover"
-                        major_color = response[2]
+                        major_color = __SUITSET__[response[2]]
                         newbanking = {'major': major_color, "banker": bid_seat}
                         self.globalInfo["banking"] = newbanking
                         self.setMajor(major_color, self.globalInfo["level"])

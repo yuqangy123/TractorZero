@@ -13,11 +13,12 @@ class BidModel(nn.Module):
                                         in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         # self.lstm = nn.LSTM(162, 128, batch_first=True)
         
-        self.dense1 = nn.Linear(840, 512)
-        self.dense2 = nn.Linear(512, 512)
-        self.dense3 = nn.Linear(512, 256)
-        self.dense4 = nn.Linear(256, 128)
-        self.dense_score = nn.Linear(128, 40)
+        self.dense1 = nn.Linear(840, 1024)
+        self.dense2 = nn.Linear(1024, 1024)
+        self.dense3 = nn.Linear(1024, 512)
+        self.dense4 = nn.Linear(512, 256)
+        self.dense5 = nn.Linear(256, 128)
+        self.dense_score = nn.Linear(128, 41)
         self.dense_suit  = nn.Linear(128, 4)
 
     def forward(self, obs_z, obs_x, mask, return_value=False, flags=None):
@@ -28,14 +29,26 @@ class BidModel(nn.Module):
         x = F.leaky_relu_(self.dense2(x))
         x = F.leaky_relu_(self.dense3(x))
         x = F.leaky_relu_(self.dense4(x))
+        x = F.leaky_relu_(self.dense5(x))
         y_score = self.dense_score(x)
         y_suit = self.dense_suit(x)
         y_score = y_score + mask
     
         if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
             #随机探索
-            out_score = t.multinomial(mask, num_samples=1).squeeze(1)
-            out_suit = np.random.randint(0, 4)
+            valid_actions = (mask > -100).float()
+            
+            num_valid = valid_actions.sum()
+            
+            # 防止没有合法动作的情
+            if num_valid == 0:
+                valid_actions = t.ones_like(valid_actions)
+                num_valid = valid_actions.sum()
+            
+            prob_distribution = valid_actions / num_valid
+            
+            out_score = t.multinomial(prob_distribution, num_samples=1).squeeze(1)
+            out_suit = t.tensor(np.random.randint(0, 4))
             
         else:
             out_score = t.argmax(y_score, dim=1)[0]

@@ -93,10 +93,7 @@ class Env:
             
         mult = -1 if banker == play_rights else 1
         
-        reward = {}
-        reward['banker'].append(r * mult)
-        reward['banker_down'].append(r * mult)
-        reward['banker_up'].append(r * mult)
+        reward = {'banker': [r * mult], 'banker_down': [r * mult], 'banker_up': [r * mult]}
         
         return reward
 
@@ -279,7 +276,7 @@ def _get_banker_obs_resnet(infoset):
     legal_actions = [[] for _ in range(__WRONG__)]
     for k, actions in infoset.legal_actions.items():
         for act in actions:
-            legal_actions[k].append(cards2matrix(act), level=level, major=major)
+            legal_actions[k].append(cards2matrix(act, level=level, major=major))
     legal_actions = np.array(legal_actions)
         
     
@@ -460,7 +457,6 @@ def _get_bid_obs_resnet(infoset):
                   ))
     x_no_action = np.expand_dims(x_no_action, axis=0)
     
-    
     z = np.hstack((
                     last_bid_score,
                     mask_bid_score,
@@ -480,22 +476,24 @@ def _get_cover_obs_resnet(infoset):
     my_handcards = cards2matrix(infoset.player_hand_cards)
     
     legal_actions = cards2matrix(infoset.player_hand_cards)
-    
-    #分数归一化
-    bid_score = _get_one_hot_array(bid_score//5, 40)
+    legal_actions = np.expand_dims(legal_actions, axis=0)
     
     x_no_action = np.vstack((
                     my_handcards,# 2*4*15 = 120
                   ))
-
+    x_no_action = np.expand_dims(x_no_action, axis=0)
+    
+    #分数归一化
+    bid_score = _get_one_hot_array(bid_score//5, 40)
     z = np.hstack((
                     bid_score                
                 ))
-
+    z = np.expand_dims(z, axis=0)
+    
     obs = {
         'position': infoset.player_position,
-        'x': x_no_action.astype(np.int8),
-        'z': z.astype(np.int8),
+        'x': x_no_action.astype(np.float32),
+        'z': z.astype(np.float32),
         'legal_actions': legal_actions,
     }
     return obs

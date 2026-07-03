@@ -115,24 +115,25 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                     _action_idx = agent_output['action'].cpu().detach().item()
                     action = env_output['legal_actions'][_action_tp][_action_idx].cpu().detach().item()
                     
-                    play_action_type_buf.append(_action_tp)
-                    play_action_type_mask_buf.append(torch.from_numpy(np.array([len(actions) for actions in env_output['legal_actions']])))
-                    play_action_buf.append(torch.from_numpy(action))
+                    play_action_type_buf[position].append(_action_tp)
+                    play_action_type_mask_buf[position].append(torch.from_numpy(np.array([len(actions) for actions in env_output['legal_actions']])))
+                    play_action_buf[position].append(torch.from_numpy(action))
                     action = [action, _action_tp]
                     
                 else:
-                    action = agent_output['action'].cpu().detach().item()
                     if position == 'bid':
+                        action = agent_output['action'].cpu().detach().item()
                         suit = agent_output['suit'].cpu().detach().item()
                         bid_action_mask_buf['bid'].append(env_output['legal_actions'].cpu().detach())
                         bid_score_buf['bid'].append(action)
                         bid_suit_buf['bid'].append(suit)
-                        action = [(action+1)*5, suit]#1个值代表5分
+                        action = [action*5, suit]#1个值代表5分
                         
                     elif position == 'cover':
+                        action = agent_output['action'].cpu().detach()
                         cover_action_mask_buf['cover'].append(env_output['legal_actions'].cpu().detach())
                         cover_action_buf['cover'].append(action)
-                        action = [action]
+                        action = [action.squeeze(dim=0)]
                     else:
                         raise ValueError(f"unkown position:{position}")
                     
@@ -145,7 +146,7 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                 
                 if env_output['stage'] == 'roundend' or env_output['stage'] == 'gameend':
                     step_reward = env._get_step_reward()
-                    target_adp_buf.append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_up']])
+                    target_adp_buf[position].append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_up']])
                     
                 if env_output['done']:
                     game_reward = env._get_reward()
@@ -157,9 +158,9 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                             wp_return = game_reward[p]
                             target_wp_buf[p].extend([wp_return for _ in range(diff)])
                             
-                    bid_return_buf.append(game_reward['bid'])
-                    cover_public_score_buf.append(game_reward['cover_public_score'])
-                    cover_return_buf.append(game_reward['cover'])
+                    bid_return_buf['bid'].append(game_reward['bid'])
+                    cover_public_score_buf['cover'].append(game_reward['cover_public_score'])
+                    cover_return_buf['cover'].append(game_reward['cover'])
                     break
 
             for p in ['banker', 'banker_up', 'banker_down']:
