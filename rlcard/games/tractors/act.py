@@ -53,12 +53,13 @@ def create_optimizers(flags, learner_model):
     """
     Create three optimizers for the three positions
     """
-    positions = ['banker', 'banker_down', 'banker_up', 'bid', 'cover']
+    positions = {'banker':'learning_rate_banker', 'banker_down':'learning_rate_idler',\
+        'banker_up':'learning_rate_idler', 'bid':'learning_rate_bid', 'cover':'learning_rate_cover'}
     optimizers = {}
-    for position in positions:
+    for position, learn_rate in positions.items():
         optimizer = RAdam(
             learner_model.parameters(position),
-            lr=flags.learning_rate,
+            lr=getattr(flags, learn_rate),
             eps=flags.epsilon)
         optimizers[position] = optimizer
     return optimizers
@@ -66,12 +67,12 @@ def create_optimizers(flags, learner_model):
 def create_env(flags):
     return Env(flags.objective)
 
-def act(i, device, batch_queues, model, flags):
+def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermodel, flags):
     positions = ["banker", 'banker_up', 'banker_down', 'bid', 'cover']
     
     try:
         T = flags.unroll_length
-        print('Device %s Actor %i started.', str(device), i)
+        print(f'Device {str(device)} Actor {i} started.')
 
         env = create_env(flags)
         env = Environment(env, device)
@@ -112,7 +113,7 @@ def act(i, device, batch_queues, model, flags):
                 if position in ['banker', 'banker_up', 'banker_down']:
                     _action_tp = agent_output['action_type'].cpu().detach().item()
                     _action_idx = agent_output['action'].cpu().detach().item()
-                    action = env_output['legal_actions'][_action_tp][_action_idx]
+                    action = env_output['legal_actions'][_action_tp][_action_idx].cpu().detach().item()
                     
                     play_action_type_buf.append(_action_tp)
                     play_action_type_mask_buf.append(torch.from_numpy(np.array([len(actions) for actions in env_output['legal_actions']])))
@@ -120,16 +121,17 @@ def act(i, device, batch_queues, model, flags):
                     action = [action, _action_tp]
                     
                 else:
-                    action = agent_output['action']
+                    action = agent_output['action'].cpu().detach().item()
                     if position == 'bid':
-                        bid_action_mask_buf.append(env_output['legal_actions'][:])
-                        bid_score_buf.append(action[:])
-                        bid_suit_buf.append(agent_output['suit'])
-                        action = [action, agent_output['suit']]
+                        suit = agent_output['suit'].cpu().detach().item()
+                        bid_action_mask_buf['bid'].append(env_output['legal_actions'].cpu().detach())
+                        bid_score_buf['bid'].append(action)
+                        bid_suit_buf['bid'].append(suit)
+                        action = [(action+1)*5, suit]#1个值代表5分
                         
                     elif position == 'cover':
-                        cover_action_mask_buf.append(env_output['legal_actions'][:])
-                        cover_action_buf.append(action)
+                        cover_action_mask_buf['cover'].append(env_output['legal_actions'].cpu().detach())
+                        cover_action_buf['cover'].append(action)
                         action = [action]
                     else:
                         raise ValueError(f"unkown position:{position}")

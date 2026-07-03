@@ -9,7 +9,7 @@ import itertools
 import numpy as np
 # full_input = {'log':[]}
 envs = dict()
-from utils import *
+from rlcard.games.tractors.env.utils import *
 
 ###############################################################
 # 牌面表示：数字
@@ -126,9 +126,10 @@ class tractorGame():
     # 确定主牌
     def setMajor(self, major, level):
         self.Major = __MAJOR__.copy()
+        major_ = str(major)
         self.pointorder = __POINT__.copy()
-        if major != 'n': # 非无主
-            self.Major = [major+point for point in self.pointorder if point != level] + [suit + level for suit in __SUITSET__ if suit != major] + [major + level] + self.Major
+        if major_ != 'n': # 非无主
+            self.Major = [major_+point for point in self.pointorder if point != level] + [suit + level for suit in __SUITSET__ if suit != major_] + [major_ + level] + self.Major
         else: # 无主
             self.Major = [suit + level for suit in __SUITSET__] + self.Major
         
@@ -2035,12 +2036,14 @@ class tractorGame():
                 bid_seat = response[0]
                 bid_score = response[1]
                 self.globalInfo["bid_seq"].append([bid_seat, bid_score])
+                
                 if 3 <= len(self.globalInfo['bid_seq']):
                     bid_win = 0
                     if self.globalInfo['bid_seq'][-1][1] == 0 and self.globalInfo['bid_seq'][-2][1] == 0: bid_win = -3
                     elif self.globalInfo['bid_seq'][-1][1] == 0 and self.globalInfo['bid_seq'][-3][1] == 0: bid_win = -2
                     elif self.globalInfo['bid_seq'][-2][1] == 0 and self.globalInfo['bid_seq'][-3][1] == 0: bid_win = -1
-                    if bid_win:
+                    #每个人都必须叫分
+                    if bid_win != 0:
                         self.globalInfo["playerpos"] = self.globalInfo['bid_seq'][bid_win][0]
                         self.globalInfo['bidsseat'] = self.globalInfo["playerpos"]
                         self.globalInfo['bidscore'] = self.globalInfo['bid_seq'][bid_win][1]
@@ -2050,7 +2053,8 @@ class tractorGame():
                         newbanking = {'major': major_color, "banker": bid_seat}
                         self.globalInfo["banking"] = newbanking
                         self.setMajor(major_color, self.globalInfo["level"])
-            
+                else:
+                    self.globalInfo["playerpos"] = (self.globalInfo["playerpos"] + 1) % __PLAYER_COUNT__
             #埋牌
             elif self.globalInfo["stage"] == "cover":
                 cover_seat = response[0]

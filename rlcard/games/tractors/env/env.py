@@ -224,6 +224,21 @@ def _get_one_hot_array(num_left_cards, max_num_cards):
 
     return one_hot
 
+def _get_one_hot_array_ex(num_left_cards, max_num_cards):
+    one_hot = np.zeros(max_num_cards)
+    if num_left_cards > 0:
+        one_hot[:num_left_cards] = 1
+
+    return one_hot
+
+def _get_custom_one_hot_array_ex(num_left_cards, max_num_cards, one_value):
+    one_hot = np.zeros(max_num_cards)
+    one_hot[:] = one_value
+    if num_left_cards > 0:
+        one_hot[:num_left_cards] = 1
+
+    return one_hot
+
 def _get_full_hot_array(num_left_cards, max_num_cards):
     one_hot = np.zeros(max_num_cards)
     if num_left_cards > 0:
@@ -431,24 +446,31 @@ def _get_idler_obs_resnet(infoset):
 
 def _get_bid_obs_resnet(infoset):
     my_handcards = cards2matrix(infoset.player_hand_cards)
-    last_bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
-    mask_bid_score = _get_one_hot_array(infoset.mask_bid_score//5, 40)
+    last_bid_score = _get_one_hot_array_ex(infoset.bid_score//5 + 1, 40 + 1)#1是在最开头加一个不叫
+    mask_bid_score = _get_one_hot_array_ex(infoset.mask_bid_score//5 + 1, 40 + 1)
+    #0号位表示不叫
     
-    legal_actions = _get_full_hot_array(infoset.mask_bid_score//5, 40)
+    #合法动作mask
+    legal_actions = np.zeros(40 + 1)
+    legal_actions[infoset.mask_bid_score//5 + 1:] = -999.
+    legal_actions = np.expand_dims(legal_actions, axis=0)
     
     x_no_action = np.vstack((
                     my_handcards,# 2*4*15 = 120
                   ))
+    x_no_action = np.expand_dims(x_no_action, axis=0)
+    
     
     z = np.hstack((
                     last_bid_score,
                     mask_bid_score,
                 ))
+    z = np.expand_dims(z, axis=0)
 
     obs = {
         'position': infoset.player_position,
-        'x': x_no_action.astype(np.int8),
-        'z': z.astype(np.int8),
+        'x': x_no_action.astype(np.float32),
+        'z': z.astype(np.float32),
         'legal_actions': legal_actions,
     }
     return obs

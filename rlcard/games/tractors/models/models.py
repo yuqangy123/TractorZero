@@ -9,10 +9,10 @@ import torch
 from torch import nn
 import os
 
-from games.tractors.models.bid_model import BidModel
-from games.tractors.models.cover_model import CoverModel
-from games.tractors.models.play_model import BankerModel, IdlerModel
-from games.tractors.env.utils import *
+from rlcard.games.tractors.models.bid_model import BidModel
+from rlcard.games.tractors.models.cover_model import CoverModel
+from rlcard.games.tractors.models.play_model import BankerModel, IdlerModel
+from rlcard.games.tractors.env.utils import *
 
 model_dict = {
     "banker": BankerModel,
@@ -31,11 +31,15 @@ class Model:
     def __init__(self, device=0):
         if not device == "cpu":
             device = 'cuda:' + str(device)
-        self._device = device
+        self._device = torch.device(device)
         
-        self.models = {}
-        for model_name, model_class in model_dict.items():
-            self.models[model_name] = model_class().to(torch.device(device))
+        self.models = {
+            "banker": BankerModel(4, self._device).to(self._device),
+            "banker_down": IdlerModel(4, self._device).to(self._device),
+            'banker_up': IdlerModel(4, self._device).to(self._device),
+            "bid": BidModel().to(self._device),
+            "cover": CoverModel().to(self._device),
+        }
     
     def forward(self, position, z, x, legal_actions, flags=None):
         model = self.models[position]

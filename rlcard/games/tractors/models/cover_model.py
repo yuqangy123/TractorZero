@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch as t
 import numpy as np
+import torch.nn.functional as F
 from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
 # from rlcard.games.tractors.env.utils import *
 from torch.distributions import Categorical
@@ -11,7 +12,7 @@ class CoverModel(nn.Module):
         super().__init__()
         hidden_dim = 512
         
-        self.cards_encoder = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], \
+        self.resnet = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], \
                                         in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         # self.lstm = nn.LSTM(162, 128, batch_first=True)
         
@@ -24,10 +25,10 @@ class CoverModel(nn.Module):
         x = self.resnet(obs_x)
         
         x = t.cat([obs_z, obs_z, obs_z, obs_z, x], dim=1)
-        x = nn.LeakyReLU(self.dense1(x))
-        x = nn.LeakyReLU(self.dense2(x))
-        x = nn.LeakyReLU(self.dense3(x))
-        x = nn.LeakyReLU(self.dense4(x))
+        x = F.leaky_relu_(self.dense1(x))
+        x = F.leaky_relu_(self.dense2(x))
+        x = F.leaky_relu_(self.dense3(x))
+        x = F.leaky_relu_(self.dense4(x))
         
         
         if return_value: 
@@ -88,7 +89,7 @@ class CoverModel(nn.Module):
 #         layers = []
 #         for _ in range(3):
 #             layers.append(nn.Linear(128, 512))
-#             layers.append(nn.LeakyReLU())
+#             layers.append(F.leaky_relu_())
 #         self.hid_layer = nn.Sequential(*layers)
 #         self.fc2 = nn.Linear(512, 1)
 #         self.sigmod = nn.Sigmoid()

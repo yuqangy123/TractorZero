@@ -10,15 +10,16 @@ import torch
 from torch import multiprocessing as mp
 from torch import nn
 
-from rlcard.games.tractors.models import Model
+from rlcard.games.tractors.models.models import Model
 # from .file_writer import FileWriter
 
-from rlcard.games.tractors.train_act import *
+from rlcard.games.tractors.act import *
 
 from torch.utils.tensorboard import SummaryWriter
 
 mean_episode_return_buf = {p:deque(maxlen=100) for p in ['landlord', 'landlord_up', 'landlord_down', 'bidding']}
 
+__timer = timeit.default_timer
 
 def compute_loss(logits, targets):
     loss = ((logits.squeeze(-1) - targets) ** 2).mean()
@@ -250,12 +251,14 @@ def train(flags):
         print(f"Resuming preempted job, current stats:\n{stats}")
 
     # Starting actor processes
+    banker_win_counter = ctx.Value('i', 0)
+    idler_win_counter = ctx.Value('i', 0)
     for device in device_iterator:
-        num_actors = flags.num_actors
         for i in range(flags.num_actors):
             actor = mp.Process(
                 target=act,
-                args=(i, device, batch_queues, models[device], flags))
+                #i, device, batch_queues, banker_win_counter, idler_win_countermodel, flags
+                args=(i, device, batch_queues, models[device], banker_win_counter, idler_win_counter, flags))
             # actor.setDaemon(True)
             actor.start()
             actor_processes.append(actor)
@@ -270,7 +273,7 @@ def train(flags):
         
         while frames < flags.total_frames:
             # start_t = __timer()
-            batch = get_batch_calls[position](batch_queues[device][position], position, flags, local_lock)
+            batch = get_batch_calls[position](batch_queues[position], flags, local_lock)
             # a_t = __timer()
             # if 'landlord' == position:#test code 不训练地主
             #     continue
@@ -325,6 +328,10 @@ def train(flags):
         if flags.disable_checkpoint:
             return
         print('Saving checkpoint to %s', checkpointpath)
+        if not os.path.exists(checkpointpath):
+            os.makedirs(checkpointpath, exist_ok=True)
+            print(f"Created checkpoint directory: {checkpointpath}")
+
         _models = learner_model.get_models()
         torch.save({
             'model_state_dict': {k: _models[k].state_dict() for k in _models},  # {{"general": _models["landlord"].state_dict()}
@@ -342,19 +349,24 @@ def train(flags):
             torch.save(learner_model.get_model(position).state_dict(), model_weights_dir)
 
     fps_log = []
-    timer = timeit.default_timer
     try:
-        last_checkpoint_time = timer() - flags.save_interval * 60
+        eval_model_t = __timer()
+        last_checkpoint_time = __timer()
         while frames < flags.total_frames:
             start_frames = frames
             position_start_frames = {k: position_frames[k] for k in position_frames}
-            start_time = timer()
-            time.sleep(5)
+            position_start_train_frames = {k: position_train_frame[k] for k in position_train_frame}
+            
+            start_time = __timer()
+            time.sleep(10)
 
-            if timer() - last_checkpoint_time > flags.save_interval * 60:  
-                checkpoint(frames)
-                last_checkpoint_time = timer()
-            end_time = timer()
+            checkpoint_frames = 0
+            if __timer() - last_checkpoint_time > flags.save_interval * 60:
+                checkpoint_frames = frames
+                checkpoint(checkpoint_frames)
+                last_checkpoint_time = __timer()
+                                    
+            end_time = __timer()
 
             fps = (frames - start_frames) / (end_time - start_time)
             fps_log.append(fps)
@@ -362,8 +374,13 @@ def train(flags):
                 fps_log = fps_log[1:]
             fps_avg = np.mean(fps_log)
 
-            position_fps = {k:(position_frames[k]-position_start_frames[k])/(end_time-start_time) for k in position_frames}
-            print('After %i (L:%i D:%i U:%i B:%i C:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f D:%.1f U:%.1f B:%.1f C:%.1f) Stats:\n%s',
+            position_fps = {k: (position_frames[k] - position_start_frames[k]) / (end_time - start_time) for k in
+                            position_frames}
+            position_learn_fps = {k: (position_train_frame[k] - position_start_train_frames[k]) for k in
+                            position_train_frame}
+            
+            #'banker', 'banker_down', 'banker_up', 'bid', 'cover'
+            print('After %i (L:%i U:%i D:%i B:%i C:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) learn_frames:(L:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) winner_count:(B:%i, I:%i) Stats:\n%s' % (
                      frames,
                      position_frames['banker'],
                      position_frames['banker_down'],
@@ -377,10 +394,30 @@ def train(flags):
                      position_fps['banker_up'],
                      position_fps['bid'],
                      position_fps['cover'],
-                     pprint.pformat(stats))
+                     position_learn_fps['banker'],
+                     position_learn_fps['banker_down'],
+                     position_learn_fps['banker_up'],
+                     position_learn_fps['bid'],
+                     position_learn_fps['cover'],
+                     banker_win_counter.value,
+                     idler_win_counter.value,
+                     pprint.pformat(stats)))
+            if checkpoint_frames > 0:
+                if 60*60 < __timer() - eval_model_t:
+                    eval_model_t = __timer()
+                    def eval_thread():
+                        flags.log_print = False
+                        flags.eval_data = 'eval_data_200.pkl'
+                        # evaluate_training_models(checkpoint_frames, flags)
+                    threading.Thread(
+                        target=eval_thread, name='eval_thread',
+                        args=()).start()
+            
+            
+                   
 
     except KeyboardInterrupt:
-        return 
+        return
     else:
         for thread in threads:
             thread.join()

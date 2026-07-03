@@ -1,15 +1,8 @@
-from collections import Counter, OrderedDict, deque
-import numpy as np
-import torch
-from itertools import chain
 from rlcard.games.tractors.env.utils import *
-import logging, random
-import traceback
-from rlcard.envs import Env
+import logging
 from rlcard.games.tractors.env.botzone import tractorGame as tractors
-import copy
-import os, math
-from  utils import *
+import os
+from rlcard.games.tractors.env.utils import *
 
 os.environ['PYDEVD_WARN_SLOW_RESOLVE_TIMEOUT'] = '5.0'#设置环境变量增加超时时间
 
@@ -33,6 +26,8 @@ class BidInfoSet(object):
         self.bid_score = 0
         
         self.mask_bid_score = None
+        
+        self.seat = 0
         
 
 class CoverInfoSet(object):
@@ -78,6 +73,7 @@ class GameEnv(tractors):
     '''
 
     def __init__(self):
+        super().__init__()
         self.num_wins = {'banker': 0,
                          'banker_up': 0,
                          'banker_down': 0,
@@ -168,7 +164,7 @@ class GameEnv(tractors):
         if self.stage == "bid":
             play_pos = env.getPlayerPosition()
             self.bidding_player_position = play_pos
-            self.bid_infoset.player_position = play_pos
+            self.bid_infoset.seat = play_pos
             self.bid_infoset.player_hand_cards = env.getPlayerHandCards(play_pos)
             self.bid_infoset.bid_score = env.getLeastBidScore()
             self.bid_infoset.mask_bid_score = self.bid_infoset.bid_score - 5#可叫分范围
