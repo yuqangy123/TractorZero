@@ -428,9 +428,9 @@ class tractorGame():
         random.seed(seedRandom)
         if "allocation" in full_input["initdata"]:
             allocation = full_input["initdata"]["allocation"]
-        else: # 产生大家各自有什么牌
+        else:
             '''每局使用两副牌（去掉三和四），每人分得28张手牌，剩余8张为底牌，共92张牌，组队需凑齐3人。'''
-            allo = [i for i in range(8)] + [i for i in range(16, 54)] + [i for i in range(54+8)] + [i for i in range(54+16, 54+54)]
+            allo = [i for i in range(8)] + [i for i in range(16, 54)] + [i for i in range(54,54+8)] + [i for i in range(54+16, 54+54)]
             rng = np.random.default_rng()
             rng.shuffle(allo)
             allocation = []
@@ -493,6 +493,13 @@ class tractorGame():
             # self.player_hand_cards[first].append(allocation[first][0])
             self.globalInfo["stage"] = "bid"
             self.globalInfo["bid_seq"] = []
+            
+            all_hand_cards = {i:0 for i in range(108)}            
+            for hand_cards in self.player_hand_cards:
+                    for c in hand_cards:
+                        all_hand_cards[c] += 1
+                        if all_hand_cards[c] > 1:
+                            raise ValueError("repeated hand card card:", c)
             
         elif self.globalInfo["stage"] == "finalend":
             self.globalInfo["first_round"] = None
@@ -2053,6 +2060,13 @@ class tractorGame():
                         newbanking = {'major': major_color, "banker": bid_seat}
                         self.globalInfo["banking"] = newbanking
                         self.setMajor(major_color, self.globalInfo["level"])
+                        
+                        all_hand_cards = {i:0 for i in range(108)}            
+                        for hand_cards in self.player_hand_cards:
+                                for c in hand_cards:
+                                    all_hand_cards[c] += 1
+                                    if all_hand_cards[c] > 1:
+                                        raise ValueError("repeated hand card card:", c)
                 else:
                     self.globalInfo["playerpos"] = (self.globalInfo["playerpos"] + 1) % __PLAYER_COUNT__
             #埋牌
@@ -2061,7 +2075,10 @@ class tractorGame():
                 cover_cards = response[1]
                 
                 
-                for c in cover_cards: self.player_hand_cards[cover_seat].remove(c)
+                for c in cover_cards: 
+                    if c not in self.player_hand_cards[cover_seat]:
+                        raise ValueError("repeated hand card card:", c)
+                    self.player_hand_cards[cover_seat].remove(c)
                 self.globalInfo["publiccard"] = cover_cards
 
                 self.globalInfo["history"] = [[],[], [cover_seat], [cover_seat]]

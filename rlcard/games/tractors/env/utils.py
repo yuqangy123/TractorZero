@@ -144,82 +144,7 @@ def create_buffers(flags, device_iterator):
             buffers[device][position] = _buffers
     return buffers
 
-def act(i, device, free_queue, full_queue, model, buffers, flags):
-    """
-    This function will run forever until we stop it. It will generate
-    data from the environment and send the data to buffer. It uses
-    a free queue and full queue to syncup with the main process.
-    """
-    positions = ['landlord', 'landlord_up', 'landlord_down']
-    try:
-        T = flags.unroll_length
-        log.info('Device %s Actor %i started.', str(device), i)
 
-        env = create_env(flags)
-        env = Environment(env, device)
-
-        done_buf = {p: [] for p in positions}
-        episode_return_buf = {p: [] for p in positions}
-        target_buf = {p: [] for p in positions}
-        obs_x_no_action_buf = {p: [] for p in positions}
-        obs_action_buf = {p: [] for p in positions}
-        obs_z_buf = {p: [] for p in positions}
-        size = {p: 0 for p in positions}
-
-        position, obs, env_output = env.initial()
-
-        while True:
-            while True:
-                obs_x_no_action_buf[position].append(env_output['obs_x_no_action'])
-                obs_z_buf[position].append(env_output['obs_z'])
-                with torch.no_grad():
-                    agent_output = model.forward(position, obs['z_batch'], obs['x_batch'], flags=flags)
-                _action_idx = int(agent_output['action'].cpu().detach().numpy())
-                action = obs['legal_actions'][_action_idx]
-                obs_action_buf[position].append(_cards2tensor(action))
-                size[position] += 1
-                position, obs, env_output = env.step(action)
-                if env_output['done']:
-                    for p in positions:
-                        diff = size[p] - len(target_buf[p])
-                        if diff > 0:
-                            done_buf[p].extend([False for _ in range(diff-1)])
-                            done_buf[p].append(True)
-
-                            episode_return = env_output['episode_return'] if p == 'landlord' else -env_output['episode_return']
-                            episode_return_buf[p].extend([0.0 for _ in range(diff-1)])
-                            episode_return_buf[p].append(episode_return)
-                            target_buf[p].extend([episode_return for _ in range(diff)])
-                    break
-
-            for p in positions:
-                while size[p] > T: 
-                    index = free_queue[p].get()
-                    if index is None:
-                        break
-                    for t in range(T):
-                        buffers[p]['done'][index][t, ...] = done_buf[p][t]
-                        buffers[p]['episode_return'][index][t, ...] = episode_return_buf[p][t]
-                        buffers[p]['target'][index][t, ...] = target_buf[p][t]
-                        buffers[p]['obs_x_no_action'][index][t, ...] = obs_x_no_action_buf[p][t]
-                        buffers[p]['obs_action'][index][t, ...] = obs_action_buf[p][t]
-                        buffers[p]['obs_z'][index][t, ...] = obs_z_buf[p][t]
-                    full_queue[p].put(index)
-                    done_buf[p] = done_buf[p][T:]
-                    episode_return_buf[p] = episode_return_buf[p][T:]
-                    target_buf[p] = target_buf[p][T:]
-                    obs_x_no_action_buf[p] = obs_x_no_action_buf[p][T:]
-                    obs_action_buf[p] = obs_action_buf[p][T:]
-                    obs_z_buf[p] = obs_z_buf[p][T:]
-                    size[p] -= T
-
-    except KeyboardInterrupt:
-        pass  
-    except Exception as e:
-        log.error('Exception in worker process %i', i)
-        traceback.print_exc()
-        print()
-        raise e
 
 # level=11
 # major=3
@@ -239,7 +164,7 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
 # print(matrix)
 # print(matrix == matrix_cp)
 #扑克牌(number)转矩阵
-def cards2matrix(list_cards, level='2', major='s'):
+def cards2matrix(list_cards, major='s', level='2'):
     """
         '3','4','5','6','7','8','9','10','J','Q','K','A','2','o','O'
     s    0   0   0   0   0   0   0   0   0   0   0   0   0   1   1
@@ -263,9 +188,9 @@ def cards2matrix(list_cards, level='2', major='s'):
     'Q'    0   0   0   0
     'K'    0   0   0   0
     'A'    0   0   0   0
-    '2'    0   0   0   0
-    'o'    1   0   0   0
-    'O'    1   0   0   0
+    '2'    0   0   0   0 52
+    'o'    1   0   0   0 56
+    'O'    1   0   0   0 60
     [2, 15, 4] 
     """
     matrix = np.zeros(54*2, dtype=np.int8)
@@ -287,9 +212,9 @@ def cards2matrix(list_cards, level='2', major='s'):
         if level == 0:
             new_order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 13, 14]
         else:
-            new_order = range(1, 15)
-            new_order.insert(-3, 0)  # 在12后面插入
-            del new_order[level]
+            new_order = list(range(1, 15))
+            new_order.insert(-2, 0)  # 在12后面插入
+            del new_order[level-1]
             new_order.insert(-2, level)  # 插入级牌
             
         # view = matrix[:,:,level:-2]
@@ -303,7 +228,7 @@ def cards2matrix(list_cards, level='2', major='s'):
     return matrix
 
 
-def matrix2cards(matrix, level='2', major='s'):
+def matrix2cards(matrix, major='s', level='2'):
     #转换花色
     major = __SUITSET__.index(major)
     if major != 0:
@@ -317,7 +242,7 @@ def matrix2cards(matrix, level='2', major='s'):
             new_order = [12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]
         else:
             new_order = [11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
-            new_order.insert(level+1, 12)
+            new_order.insert(level, 12)
         # view = mat[:,:,level:-2]
         # view[:]=np.roll(view, shift=1, axis=2)
     matrix = matrix[:, :, new_order]
@@ -331,8 +256,33 @@ def matrix2cards(matrix, level='2', major='s'):
     indices = np.where(np.array(selected_cards) == 1)[0]
     return indices
 
-# card2mst = cards2matrix([66, 3, 56, 76, 40, 33, 48, 80, 52,53, 107,5], '2', 'c')
-# mst2card = matrix2cards(card2mst,  '2', 'c')
+def test_matrix_cards_transform():
+    def __num2Poker__(num): # num: int-[0,107]
+            # Already a poker
+            # if type(num) is str and (num in self.Major or (num[0] in __SUITSET__ and num[1] in __CARDSCALE__)):
+            #     return num
+            # Locate in 1 single deck
+            NumInDeck = num % 54
+            # joker and Joker:
+            if NumInDeck == 52:
+                return "jo"
+            if NumInDeck == 53:
+                return "Jo"
+            # Normal cards:
+            pokernumber = __CARDSCALE__[NumInDeck // 4]
+            pokersuit = __SUITSET__[NumInDeck % 4]
+            return pokersuit + pokernumber
+        
+    poker_test = [3, 5, 33, 40, 48, 52, 53, 56, 66, 76, 80, 107]
+    print([__num2Poker__(p)for p in poker_test])
+    poker_test = np.array(poker_test)
+
+    for major in ['s', 'h', 'c', 'd']:
+        for level in ['A', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'J', 'Q', 'K']:
+            card2mst = cards2matrix(poker_test, major, level)
+            mst2card_test = matrix2cards(card2mst, major, level)
+            assert (mst2card_test == poker_test).all(), f"Failed for major={major}, level={level}"
+# test_matrix_cards_transform()
 # print(mst2card)
 def get_one_hot_array(num_left_cards, max_num_cards):
     """

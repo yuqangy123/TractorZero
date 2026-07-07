@@ -111,7 +111,7 @@ class GameEnv(tractors):
         self.last_round_play_cards = {'banker':[], 'banker_up':[], 'banker_down':[]}
         
         self.mask_cards = {'banker':list(range(108)), 'banker_up':list(range(108)), 'banker_down':list(range(108))}
-       
+        
         super().reset()
         
         #初始化bid_infoset
@@ -142,9 +142,21 @@ class GameEnv(tractors):
             
         elif last_stage == 'cover':
             play_pos = env.getBanker()
-            for i, r in enumerate(['banker', 'banker_down', 'banker_up']):                            
+            
+            all_hand_cards = {i:0 for i in range(108)}
+            for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
                 hand_cards = env.getPlayerHandCards((play_pos+i)%__PLAYER_COUNT__)
-                for c in hand_cards:self.mask_cards[r].remove(c)
+                for c in hand_cards:
+                    all_hand_cards[c] += 1
+                    if all_hand_cards[c] > 1:
+                        raise ValueError("repeated hand card card:", c)
+                    
+            for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
+                hand_cards = env.getPlayerHandCards((play_pos+i)%__PLAYER_COUNT__)
+                for c in hand_cards:
+                    if c not in self.mask_cards[r]:
+                        pass
+                    self.mask_cards[r].remove(c)
             
         #step
         super().step(response)

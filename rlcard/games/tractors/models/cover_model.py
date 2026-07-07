@@ -43,7 +43,7 @@ class CoverModel(nn.Module):
                 mask_shape = mask.shape
                 mask = mask.reshape(mask.shape[0], -1)
                 action = t.multinomial(mask.float(), num_samples=8, replacement=False).squeeze(1)
-                action.reshape(mask_shape)
+                action = action.reshape(mask_shape)
             
             else:
                 mask_shape = mask.shape
@@ -53,7 +53,7 @@ class CoverModel(nn.Module):
                 top_k_values, top_k_indices = t.topk(out, k=8, dim=1)
                 action = t.zeros_like(out)
                 action.scatter_(1, top_k_indices, 1.0)
-                # action.reshape(mask_shape)
+                action = action.reshape(mask_shape)
             # return dict(score=y_score_out, y_suit=y_suit_out, score_values=y_score, suit_values=y_suit)
             if return_value: 
                 return dict(action = action, values = (out, top_k_indices))

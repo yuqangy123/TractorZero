@@ -174,6 +174,14 @@ class Env:
         return self._env.cover_over
     
     @property
+    def _major(self):
+        return self._env.getMajorColor()
+    
+    @property
+    def _level(self):
+        return self._env.getLevel()
+    
+    @property
     def _stage(self):
         return self._env.stage
 

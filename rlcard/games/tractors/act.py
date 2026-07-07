@@ -1,6 +1,7 @@
 from rlcard.games.tractors.env.env import Env
 # from .env.env import Env
 from .env.env_utils import Environment#*
+from .env.utils import *
 import torch
 import traceback
 import numpy as np
@@ -133,7 +134,8 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                         action = agent_output['action'].cpu().detach()
                         cover_action_mask_buf['cover'].append(env_output['legal_actions'].cpu().detach())
                         cover_action_buf['cover'].append(action)
-                        action = [action.squeeze(dim=0)]
+                        action = matrix2cards(action.squeeze(dim=0), major=env.env._major, level=env.env._level)
+                        action = [action]
                     else:
                         raise ValueError(f"unkown position:{position}")
                     
