@@ -62,7 +62,7 @@ class Environment:
             mask_action_type=mask_action_type,
             stage = self.env._stage,
         )
-        if position in ['banker', 'banker_down', 'banker_up']:
+        if position in ['banker', 'banker_op', 'banker_down', 'banker_up']:
             env_output['legal_types'] = obs['legal_types']
             env_output['legal_type2actions'] = obs['legal_type2actions']
             

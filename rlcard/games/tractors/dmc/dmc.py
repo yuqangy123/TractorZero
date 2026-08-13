@@ -10,14 +10,15 @@ import torch
 from torch import multiprocessing as mp
 from torch import nn
 
-from rlcard.games.tractors.models.models import Model
+from ..model.models import Model
+# from rlcard.games.tractors.models.models import Model
 # from .file_writer import FileWriter
 
 from rlcard.games.tractors.act import *
 
 from torch.utils.tensorboard import SummaryWriter
 
-mean_episode_return_buf = {p:deque(maxlen=100) for p in ['landlord', 'landlord_up', 'landlord_down', 'bidding']}
+mean_episode_return_buf = {p:deque(maxlen=100) for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
 
 __timer = timeit.default_timer
 
@@ -203,7 +204,7 @@ def train(flags):
         model.eval()
         models[device] = model
 
-    positions = ['banker', 'banker_down', 'banker_up', 'bid', 'cover']
+    positions = ['banker', 'banker_op', 'banker_down', 'banker_up', 'bid', 'cover']
     
     # Initialize queues
     actor_processes = []
@@ -263,8 +264,8 @@ def train(flags):
             actor.start()
             actor_processes.append(actor)
 
-    learn_calls = {'bid': learn_bid, 'cover': learn_cover, 'banker': learn_play, 'banker_down': learn_play, 'banker_up': learn_play}
-    get_batch_calls = {'bid': get_batch_bid, 'cover': get_batch_cover, 'banker': get_batch_play, 'banker_down': get_batch_play, 'banker_up': get_batch_play}
+    learn_calls = {'bid': learn_bid, 'cover': learn_cover, 'banker': learn_play, 'banker_op': learn_play, 'banker_down': learn_play, 'banker_up': learn_play}
+    get_batch_calls = {'bid': get_batch_bid, 'cover': get_batch_cover, 'banker': get_batch_play, 'banker_op': get_batch_play, 'banker_down': get_batch_play, 'banker_up': get_batch_play}
     
     def batch_and_learn(i, device, position, local_lock, position_lock, lock=threading.Lock()):
         """Thread target for the learning process."""
@@ -379,10 +380,11 @@ def train(flags):
             position_learn_fps = {k: (position_train_frame[k] - position_start_train_frames[k]) for k in
                             position_train_frame}
             
-            #'banker', 'banker_down', 'banker_up', 'bid', 'cover'
-            print('After %i (L:%i U:%i D:%i B:%i C:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) learn_frames:(L:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) winner_count:(B:%i, I:%i) Stats:\n%s' % (
+            #'banker', 'banker_op', 'banker_down', 'banker_up', 'bid', 'cover'
+            print('After %i (L:%i O:%i U:%i D:%i B:%i C:%i) frames: @ %.1f fps (avg@ %.1f fps) (L:%.1f O:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) learn_frames:(L:%.1f O:%.1f U:%.1f D:%.1f B:%.1f C:%.1f) winner_count:(B:%i, I:%i) Stats:\n%s' % (
                      frames,
                      position_frames['banker'],
+                     position_frames['banker_op'],
                      position_frames['banker_down'],
                      position_frames['banker_up'],
                      position_frames['bid'],
@@ -390,11 +392,13 @@ def train(flags):
                      fps,
                      fps_avg,
                      position_fps['banker'],
+                     position_fps['banker_op'],
                      position_fps['banker_down'],
                      position_fps['banker_up'],
                      position_fps['bid'],
                      position_fps['cover'],
                      position_learn_fps['banker'],
+                     position_learn_fps['banker_op'],
                      position_learn_fps['banker_down'],
                      position_learn_fps['banker_up'],
                      position_learn_fps['bid'],

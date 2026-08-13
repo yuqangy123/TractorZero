@@ -9,8 +9,8 @@ import scipy.signal
 import gym
 import os
 import datetime
-from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
-# from rlcard.games.tractors.models.common_model import PlayerEncoder
+from .BasicBlockM import ResNet, ResidualBlock
+# from .common_model import PlayerEncoder
 
 # Add Transformer components
 class PositionalEncoding(nn.Module):

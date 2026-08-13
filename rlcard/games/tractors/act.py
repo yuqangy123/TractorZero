@@ -54,7 +54,7 @@ def create_optimizers(flags, learner_model):
     """
     Create three optimizers for the three positions
     """
-    positions = {'banker':'learning_rate_banker', 'banker_down':'learning_rate_idler',\
+    positions = {'banker':'learning_rate_banker', 'banker_op':'learning_rate_idler', 'banker_down':'learning_rate_idler',\
         'banker_up':'learning_rate_idler', 'bid':'learning_rate_bid', 'cover':'learning_rate_cover'}
     optimizers = {}
     for position, learn_rate in positions.items():
@@ -69,7 +69,7 @@ def create_env(flags):
     return Env(flags.objective)
 
 def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermodel, flags):
-    positions = ["banker", 'banker_up', 'banker_down', 'bid', 'cover']
+    positions = ["banker", 'banker_op', 'banker_up', 'banker_down', 'bid', 'cover']
     
     try:
         T = flags.unroll_length
@@ -110,7 +110,7 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
         while True:
             while True:
                                  
-                if position in ['banker', 'banker_up', 'banker_down']:
+                if position in ['banker', 'banker_op', 'banker_up', 'banker_down']:
                     with torch.no_grad():
                         agent_output = model.forward(position, obs['z'], obs['x'], env_output['legal_actions'], legal_types=env_output['legal_types'], flags=flags)       
                     
@@ -154,11 +154,11 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                 
                 if env_output['stage'] == 'roundend' or env_output['stage'] == 'gameend':
                     step_reward = env._get_step_reward()
-                    target_adp_buf[position].append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_up']])
+                    target_adp_buf[position].append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_op'], step_reward['banker_up']])
                     
                 if env_output['done']:
                     game_reward = env._get_reward()
-                    for p in ['banker', 'banker_up', 'banker_down']:
+                    for p in ['banker', 'banker_op', 'banker_up', 'banker_down']:
                         diff = size[p] - len(target_wp_buf[p])
                         if diff > 0:
                             # done_buf[p].extend([False for _ in range(diff - 1)])
@@ -171,7 +171,7 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
                     cover_return_buf['cover'].append(game_reward['cover'])
                     break
 
-            for p in ['banker', 'banker_up', 'banker_down']:
+            for p in ['banker', 'banker_op', 'banker_up', 'banker_down']:
                 if size[p] > T:
                     batch_queues[p].put({
                         # "done": torch.stack(

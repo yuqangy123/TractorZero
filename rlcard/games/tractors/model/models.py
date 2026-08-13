@@ -9,13 +9,14 @@ import torch
 from torch import nn
 import os
 
-from rlcard.games.tractors.models.bid_model import BidModel
-from rlcard.games.tractors.models.cover_model import CoverModel
-from rlcard.games.tractors.models.play_model import BankerModel, IdlerModel
-from rlcard.games.tractors.env.utils import *
+from .bid_model import BidModel
+from .cover_model import CoverModel
+from .play_model import BankerModel, IdlerModel
+from ..env.utils import *
 
 model_dict = {
     "banker": BankerModel,
+    "banker_op": IdlerModel,
     "banker_down": IdlerModel,
     'banker_up': IdlerModel,
     "bid": BidModel,
@@ -35,6 +36,7 @@ class Model:
         
         self.models = {
             "banker": BankerModel(4, self._device).to(self._device),
+            "banker_op": IdlerModel(4, self._device).to(self._device),
             "banker_down": IdlerModel(4, self._device).to(self._device),
             'banker_up': IdlerModel(4, self._device).to(self._device),
             "bid": BidModel().to(self._device),
@@ -44,7 +46,7 @@ class Model:
     def forward(self, position, z, x, legal_actions, legal_types=None, flags=None):
         model = self.models[position]
         
-        if position in ['banker', 'banker_down', 'banker_up']:
+        if position in ['banker', 'banker_op', 'banker_down', 'banker_up']:
             _legal_types = [actions[0] for i, actions in 'legal_types']
             _legal_types = list(dict.fromkeys(_legal_types))# 去重并保持原有顺序
             # 若有多个牌型可选，先预测出牌牌型
@@ -77,14 +79,14 @@ class Model:
             raise Exception('Invalid position')
     
     def learn_action_tp(self, position, z, x, action_tp_mask):
-        if position in ['banker', 'banker_down', 'banker_up']:
+        if position in ['banker', 'banker_op', 'banker_down', 'banker_up']:
             model = self.models[position]
             output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self._device), return_value=True)
             return output
            
     
     def learn_action_play(self, position, z, x, action_type, legal_actions):
-        if position in ['banker', 'banker_down', 'banker_up']:
+        if position in ['banker', 'banker_op', 'banker_down', 'banker_up']:
             model = self.models[position]
             action_tp_mask = torch.zeros(__WRONG__).to(self._device)
             action_tp_mask[action_type] = 1.0

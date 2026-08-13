@@ -36,10 +36,10 @@ __CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
 __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
 __MAJOR__ = ['jo', 'Jo']#小王 大王
 __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
-__PLAYER_COUNT__ = 3
+__PLAYER_COUNT__ = 4
 __CARDS_NUM__ = (108)
 
-__HAND_CARD_NUM__ = 28#手牌数量
+__HAND_CARD_NUM__ = 25#手牌数量
 
 __MAX_SCORE__ = 40#最多分数，1个代表5分
 
@@ -306,54 +306,6 @@ def get_full_hot_array(num_left_cards, max_num_cards):
     return one_hot
 
 
-
-def _action_seq_list2array(action_seq_list):
-    """
-    A utility function to encode the historical moves.
-    We encode the historical 15 actions. If there is
-    no 15 actions, we pad the features with 0. Since
-    three moves is a round in DouDizhu, we concatenate
-    the representations for each consecutive three moves.
-    Finally, we obtain a 5x162 matrix, which will be fed
-    into LSTM for encoding.
-    """
-    action_seq_array = np.zeros((len(action_seq_list), 54))
-    for row, list_cards in enumerate(action_seq_list):
-        action_seq_array[row, :] = _cards2array(list_cards)
-    action_seq_array = action_seq_array.reshape(5, 162)
-    return action_seq_array
-
-def _process_action_seq(sequence, length=15):
-    """
-    A utility function encoding historical moves. We
-    encode 15 moves. If there is no 15 moves, we pad
-    with zeros.
-    """
-    sequence = sequence[-length:].copy()
-    if len(sequence) < length:
-        empty_sequence = [[] for _ in range(length - len(sequence))]
-        empty_sequence.extend(sequence)
-        sequence = empty_sequence
-    return sequence
-
-def _get_one_hot_bomb(bomb_num):
-    """
-    A utility function to encode the number of bombs
-    into one-hot representation.
-    """
-    one_hot = np.zeros(15)
-    one_hot[bomb_num] = 1
-    return one_hot
-
-def _cards2tensor(list_cards):
-    """
-    Convert a list of integers to the tensor
-    representation
-    See Figure 2 in https://arxiv.org/pdf/2106.06135.pdf
-    """
-    matrix = _cards2array(list_cards)
-    matrix = torch.from_numpy(matrix)
-    return matrix
 
 
 if __name__ == '__main__':

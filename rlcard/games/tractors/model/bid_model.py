@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch as t
 import numpy as np
 import torch.nn.functional as F
-from rlcard.games.tractors.models.BasicBlockM import ResNet, ResidualBlock
+from .BasicBlockM import ResNet, ResidualBlock
 
 class BidModel(nn.Module):
     def __init__(self):

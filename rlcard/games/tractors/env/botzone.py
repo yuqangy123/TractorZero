@@ -23,9 +23,6 @@ from rlcard.games.tractors.env.utils import *
 # __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
 # __MAJOR__ = ['jo', 'Jo']#小王 大王
 # __POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
-# __CARDSCALE_COUNT__ = 14 #点数
-# __PLAYER_COUNT__ = 3
-# __CARDS_NUM__ = (108)
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
@@ -430,8 +427,8 @@ class tractorGame():
         if "allocation" in full_input["initdata"]:
             allocation = full_input["initdata"]["allocation"]
         else:
-            '''每局使用两副牌（去掉三和四），每人分得28张手牌，剩余8张为底牌，共92张牌，组队需凑齐3人。'''
-            allo = [i for i in range(8)] + [i for i in range(16, 54)] + [i for i in range(54,54+8)] + [i for i in range(54+16, 54+54)]
+            '''每局使用两副牌共108张，每人分得25张手牌，剩余8张为底牌，4人两两一队。'''
+            allo = list(range(108))
             rng = np.random.default_rng()
             rng.shuffle(allo)
             allocation = []
@@ -532,7 +529,7 @@ class tractorGame():
                 newbanking["banker"] = currplayer
             return newbanking
         if len(repo) == 2: # 对子反主
-            if  len(banking["called"]) == 0 or len(banking["called"]) == 3: # 还未报主或已经反主
+            if  len(banking["called"]) == 0 or len(banking["called"]) == __PLAYER_COUNT__-1: # 还未报主或已经反主
                 self.setError(currplayer, "ILLEGAL_MOVE")
             poker = [self.num2Poker(repo[0]), self.num2Poker(repo[1])]
             if poker[0] != poker[1]: # 不是对子
@@ -1136,7 +1133,7 @@ class tractorGame():
 
         else: # 常规牌型
             #print("Common: Normal")
-            for i in range(1, 4):
+            for i in range(1, __PLAYER_COUNT__):
                 if self.checkPokerType(history[i], level) != tyfirst: # 牌型不对
                     continue
                 #print("check: Normal")
@@ -1171,21 +1168,21 @@ class tractorGame():
                         win_move = hist[i]
                         win_seq = i
         # 找到获胜方，加分
-        win_id = (currplayer - 3 + win_seq) % 4
+        win_id = (currplayer - (__PLAYER_COUNT__ - 1) + win_seq) % __PLAYER_COUNT__
         self.Reward(score, win_id, banker)
 
         return win_id
 
 
     def Reward(self, score, currplayer, banker):
-        if currplayer != banker: # 非庄家得分
+        if (currplayer - banker) % 2 != 0: # 非庄家方得分
             self.get_score += score
             
 
     # return endingScores(dict)
     def EndGame(self, banker, score):
         endingScores = [0]*__PLAYER_COUNT__
-        bankers = [banker]
+        bankers = [banker, (banker + 2) % __PLAYER_COUNT__]
         up_level_step = 1#晋升的级数
         bid_score = self.getLeastBidScore()
         banker_win = score < bid_score
@@ -2045,11 +2042,13 @@ class tractorGame():
                 bid_score = response[1]
                 self.globalInfo["bid_seq"].append([bid_seat, bid_score])
                 
-                if 3 <= len(self.globalInfo['bid_seq']):
-                    bid_win = 0
-                    if self.globalInfo['bid_seq'][-1][1] == 0 and self.globalInfo['bid_seq'][-2][1] == 0: bid_win = -3
-                    elif self.globalInfo['bid_seq'][-1][1] == 0 and self.globalInfo['bid_seq'][-3][1] == 0: bid_win = -2
-                    elif self.globalInfo['bid_seq'][-2][1] == 0 and self.globalInfo['bid_seq'][-3][1] == 0: bid_win = -1
+                if __PLAYER_COUNT__ <= len(self.globalInfo['bid_seq']):
+                    bid_win = 0                    
+                    recent = self.globalInfo['bid_seq'][-__PLAYER_COUNT__:]
+                    for (i,s) in enumerate(recent):
+                        if s[1] > 0:
+                            bid_win = -(__PLAYER_COUNT__-i)
+                    
                     #每个人都必须叫分
                     if bid_win != 0:
                         self.globalInfo["playerpos"] = self.globalInfo['bid_seq'][bid_win][0]
@@ -2155,7 +2154,7 @@ class tractorGame():
                         if self.checkPokerType(history[1][0], self.globalInfo["level"]) != __SUSPECT__:
                             mult = len(history[1][0])
                         else:
-                            divided, _ = self.checkThrow(history[1][0], [[]], (currplayer-3)%4, self.globalInfo["level"], major, check=False)
+                            divided, _ = self.checkThrow(history[1][0], [[]], (currplayer - (__PLAYER_COUNT__ - 1)) % __PLAYER_COUNT__, self.globalInfo["level"], major, check=False)
                             divided.sort(key=lambda x: len(x), reverse=True)
                             if len(divided[0]) >= 4:
                                 mult = len(divided[0]) * 2

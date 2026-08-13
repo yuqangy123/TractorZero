@@ -93,7 +93,10 @@ class Env:
             
         mult = -1 if banker == play_rights else 1
         
-        reward = {'banker': [r * mult], 'banker_down': [r * mult], 'banker_up': [r * mult]}
+        reward = {'banker': [r * mult],
+                  'banker_op': [r * mult],
+                  'banker_up': [-r * mult],
+                  'banker_down': [-r * mult]}
         
         return reward
 
@@ -127,11 +130,13 @@ class Env:
         if banker_win:
             end_score = self._env.getEndingScore(banker)
             reward['banker'] = end_score
+            reward['banker_op'] = end_score
             reward['banker_down'] = -end_score
             reward['banker_up'] = -end_score
         else:
             end_score = self._env.getEndingScore((banker+1)%__PLAYER_COUNT__)
             reward['banker'] = -end_score
+            reward['banker_op'] = -end_score
             reward['banker_down'] = end_score
             reward['banker_up'] = end_score
         
@@ -209,7 +214,7 @@ class DummyAgent(object):
 
 
 def get_obs(infoset, stage):
-    if infoset.player_position not in ["banker", 'banker_up', 'banker_down', 'bid', 'cover']:
+    if infoset.player_position not in ["banker", 'banker_op', 'banker_up', 'banker_down', 'bid', 'cover']:
         raise ValueError('')
     if stage == 'bid':
         return _get_bid_obs_resnet(infoset)
@@ -260,6 +265,7 @@ def _get_banker_obs_resnet(infoset):
     my_handcards = cards2matrix(infoset.player_hand_cards, level=level, major=major)
     
     banker_played_cards = cards2matrix(infoset.played_cards['banker'], level=level, major=major)
+    banker_op_played_cards = cards2matrix(infoset.played_cards['banker_op'], level=level, major=major)
     banker_up_played_cards = cards2matrix(infoset.played_cards['banker_up'], level=level, major=major)
     banker_down_played_cards = cards2matrix(infoset.played_cards['banker_down'], level=level, major=major)
     
@@ -269,16 +275,19 @@ def _get_banker_obs_resnet(infoset):
     
     remain_score_cards = cards2matrix(infoset.remain_score_cards, level=level, major=major)
     
+    banker_op_round_play_cards = cards2matrix(infoset.round_play_cards['banker_op'], level=level, major=major)
     banker_up_round_play_cards = cards2matrix(infoset.round_play_cards['banker_up'], level=level, major=major)
     banker_down_round_play_cards = cards2matrix(infoset.round_play_cards['banker_down'], level=level, major=major)
     
+    banker_op_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_op'], level=level, major=major)
     banker_up_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_up'], level=level, major=major)
     banker_down_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_down'], level=level, major=major)
     
+    banker_op_mask_cards = cards2matrix(infoset.mask_cards['banker_op'], level=level, major=major)
     banker_up_mask_cards = cards2matrix(infoset.mask_cards['banker_up'], level=level, major=major)
     banker_down_mask_cards = cards2matrix(infoset.mask_cards['banker_down'], level=level, major=major)
     
-    play_rights = _get_one_hot_array(infoset.play_rights_seat, 3)
+    play_rights = _get_one_hot_array(infoset.play_rights_seat, __PLAYER_COUNT__)
     
     legal_actions = []
     legal_types = []
@@ -295,15 +304,19 @@ def _get_banker_obs_resnet(infoset):
     
     #剩余牌张数
     banker_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker'], 28)
+        infoset.num_cards_left['banker'], __HAND_CARD_NUM__)
+
+    banker_op_num_cards_left = _get_one_hot_array(
+        infoset.num_cards_left['banker_op'], __HAND_CARD_NUM__)
 
     banker_up_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker_up'], 28)
+        infoset.num_cards_left['banker_up'], __HAND_CARD_NUM__)
 
     banker_down_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker_down'], 28)
+        infoset.num_cards_left['banker_down'], __HAND_CARD_NUM__)
     num_cards_left = np.hstack((
                          banker_num_cards_left,
+                         banker_op_num_cards_left,
                          banker_up_num_cards_left,
                          banker_down_num_cards_left))
 
@@ -321,28 +334,36 @@ def _get_banker_obs_resnet(infoset):
                         remain_score))
     
     #游戏进度
-    game_period = (28.0 - max(infoset.num_cards_left['banker'], infoset.num_cards_left['banker_up'], infoset.num_cards_left['banker_down']))/28.0
+    game_period = (float(__HAND_CARD_NUM__) - max(
+        infoset.num_cards_left['banker'],
+        infoset.num_cards_left['banker_op'],
+        infoset.num_cards_left['banker_up'],
+        infoset.num_cards_left['banker_down']))/float(__HAND_CARD_NUM__)
 
     x_no_action = np.vstack((
                     my_handcards,# 2*4*15 = 120
                     banker_played_cards,
+                    banker_op_played_cards,
                     banker_up_played_cards,
                     banker_down_played_cards,
                     other_handcards,
                     public_cards,
                     remain_score_cards,
+                    banker_op_round_play_cards,
                     banker_up_round_play_cards,
                     banker_down_round_play_cards,
+                    banker_op_last_round_played_cards,
                     banker_up_last_round_played_cards,
                     banker_down_last_round_played_cards,
+                    banker_op_mask_cards,
                     banker_up_mask_cards,
                     banker_down_mask_cards,
                   ))
 
     z = np.hstack((
-                    play_rights,# 3
+                    play_rights,# 4
                     game_period, #1
-                    num_cards_left,# 28*3 = 84
+                    num_cards_left,# 25*4 = 100
                     score_left,# 40*5 = 200                    
                 ))
 
@@ -365,10 +386,15 @@ def _get_idler_obs_resnet(infoset):
     major = infoset.major
     level = infoset.level
     
-    partner_position = 'banker_up' if infoset.player_position == 'banker_down' else 'banker_down'
+    partner_position = {
+        'banker_op': 'banker',
+        'banker_up': 'banker_down',
+        'banker_down': 'banker_up',
+    }[infoset.player_position]
     my_handcards = cards2matrix(infoset.player_hand_cards, level=level, major=major)
     
     banker_played_cards = cards2matrix(infoset.played_cards['banker'], level=level, major=major)
+    banker_op_played_cards = cards2matrix(infoset.played_cards['banker_op'], level=level, major=major)
     banker_up_played_cards = cards2matrix(infoset.played_cards['banker_up'], level=level, major=major)
     banker_down_played_cards = cards2matrix(infoset.played_cards['banker_down'], level=level, major=major)
     
@@ -377,15 +403,18 @@ def _get_idler_obs_resnet(infoset):
     remain_score_cards = cards2matrix(infoset.remain_score_cards, level=level, major=major)
     
     banker_round_play_cards = cards2matrix(infoset.round_play_cards['banker'], level=level, major=major)
+    banker_op_round_play_cards = cards2matrix(infoset.round_play_cards['banker_op'], level=level, major=major)
     partner_round_play_cards = cards2matrix(infoset.round_play_cards[partner_position], level=level, major=major)
     
     banker_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker'], level=level, major=major)
+    banker_op_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_op'], level=level, major=major)
     partner_last_round_played_cards = cards2matrix(infoset.last_round_play_cards[partner_position], level=level, major=major)
     
-    banker_mask_cards = infoset.mask_cards['banker']
-    partner_mask_cards = infoset.mask_cards[partner_position]
+    banker_mask_cards = cards2matrix(infoset.mask_cards['banker'], level=level, major=major)
+    banker_op_mask_cards = cards2matrix(infoset.mask_cards['banker_op'], level=level, major=major)
+    partner_mask_cards = cards2matrix(infoset.mask_cards[partner_position], level=level, major=major)
     
-    play_rights = _get_one_hot_array(infoset.play_rights_seat, 3)
+    play_rights = _get_one_hot_array(infoset.play_rights_seat, __PLAYER_COUNT__)
         
     legal_actions = []
     legal_types = []
@@ -402,15 +431,19 @@ def _get_idler_obs_resnet(infoset):
 
     #剩余牌张数
     banker_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker'], 28)
+        infoset.num_cards_left['banker'], __HAND_CARD_NUM__)
+
+    banker_op_num_cards_left = _get_one_hot_array(
+        infoset.num_cards_left['banker_op'], __HAND_CARD_NUM__)
 
     banker_up_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker_up'], 28)
+        infoset.num_cards_left['banker_up'], __HAND_CARD_NUM__)
 
     banker_down_num_cards_left = _get_one_hot_array(
-        infoset.num_cards_left['banker_down'], 28)
+        infoset.num_cards_left['banker_down'], __HAND_CARD_NUM__)
     num_cards_left = np.hstack((
                          banker_num_cards_left,
+                         banker_op_num_cards_left,
                          banker_up_num_cards_left,
                          banker_down_num_cards_left))
 
@@ -428,27 +461,35 @@ def _get_idler_obs_resnet(infoset):
                         remain_score))
     
     #游戏进度
-    game_period = (28.0 - max(infoset.num_cards_left['banker'], infoset.num_cards_left['banker_up'], infoset.num_cards_left['banker_down']))/28.0
+    game_period = (float(__HAND_CARD_NUM__) - max(
+        infoset.num_cards_left['banker'],
+        infoset.num_cards_left['banker_op'],
+        infoset.num_cards_left['banker_up'],
+        infoset.num_cards_left['banker_down']))/float(__HAND_CARD_NUM__)
 
     x_no_action = np.vstack((
                     my_handcards,# 2*4*15 = 120
                     banker_played_cards,
+                    banker_op_played_cards,
                     banker_up_played_cards,
                     banker_down_played_cards,
                     other_handcards,
                     remain_score_cards,
                     banker_round_play_cards,
+                    banker_op_round_play_cards,
                     partner_round_play_cards,
                     banker_last_round_played_cards,
+                    banker_op_last_round_played_cards,
                     partner_last_round_played_cards,
                     banker_mask_cards,
+                    banker_op_mask_cards,
                     partner_mask_cards,
                   ))
 
     z = np.hstack((
-                    play_rights,# 3
+                    play_rights,# 4
                     game_period, #1
-                    num_cards_left,# 28*3 = 84
+                    num_cards_left,# 25*4 = 100
                     score_left,# 40*5 = 200                    
                 ))
 
