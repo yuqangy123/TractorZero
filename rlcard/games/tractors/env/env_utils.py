@@ -20,6 +20,7 @@ def _format_observation(obs, device):
     x = torch.from_numpy(obs['x']).to(device)
     legal_actions = torch.from_numpy(obs['legal_actions'])
     
+    
     obs = {
            'z': z,
            'x': x,
@@ -55,12 +56,17 @@ class Environment:
         # reward = torch.tensor(reward).view(1, 1)
         done = torch.tensor(done).view(1, 1)
 
-        return position, obs, dict(
+        env_output = dict(
             done=done,
             legal_actions=legal_actions,
             mask_action_type=mask_action_type,
             stage = self.env._stage,
         )
+        if position in ['banker', 'banker_down', 'banker_up']:
+            env_output['legal_types'] = obs['legal_types']
+            env_output['legal_type2actions'] = obs['legal_type2actions']
+            
+        return position, obs, env_output
     
     def reset(self):
         return self.env.reset()

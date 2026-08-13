@@ -44,12 +44,13 @@ __HAND_CARD_NUM__ = 28#手牌数量
 __MAX_SCORE__ = 40#最多分数，1个代表5分
 
 #牌类型
-__SINGLE__ = 0
-__PAIR__ = 1
-__TRACTOR__ = 2
-__SUSPECT__ = 3
-__DISCARD__ = 4
-__WRONG__ = 5
+__NONE__ = 0
+__SINGLE__ = 1
+__PAIR__ = 2
+__TRACTOR__ = 3
+__SUSPECT__ = 4
+__DISCARD__ = 5
+__WRONG__ = 6
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 15: 11, 17: 12}

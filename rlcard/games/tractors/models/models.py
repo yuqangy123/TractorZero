@@ -41,21 +41,20 @@ class Model:
             "cover": CoverModel().to(self._device),
         }
     
-    def forward(self, position, z, x, legal_actions, flags=None):
+    def forward(self, position, z, x, legal_actions, legal_types=None, flags=None):
         model = self.models[position]
         
         if position in ['banker', 'banker_down', 'banker_up']:
-            action_tp_mask = [len(actions) for actions in legal_actions]
+            _legal_types = [actions[0] for i, actions in 'legal_types']
+            _legal_types = list(dict.fromkeys(_legal_types))# 去重并保持原有顺序
             # 若有多个牌型可选，先预测出牌牌型
-            if sum(action_tp_mask) > 1:
-                tp_output = model.forward_tp(z, x, torch.tensor(action_tp_mask).to(self._device), flags=flags)
-                action_type = tp_output['action']
+            if len(legal_types) > 1:
+                tp_output = model.forward_tp(z, x, torch.from_numpy(legal_types).to(self._device), flags=flags)
+                action_type = legal_types[tp_output['action']]
             else:
-                action_type = next(i for i, count in enumerate(action_tp_mask) if count > 0)
+                action_type = legal_types[0]
             
-            action_tp_mask = torch.zeros(__WRONG__).to(self._device)
-            action_tp_mask[action_type] = 1.0
-            _z = torch.cat([z, action_tp_mask], dim=1)
+            _z = torch.cat([z, action_type], dim=1)
             
             _x_batch = np.repeat(
                 x[np.newaxis, :, :],
@@ -63,7 +62,7 @@ class Model:
             x_batch = np.concatenate((legal_actions[action_type], _x_batch), axis=1)
             
             output = model.forward_act(_z, x_batch, flags=flags)
-            return dict(action_type=action_type, action=output['action'])
+            return dict(action_type=action_type, action=output['action'], action_x = x_batch[output['action']])
         
         elif position == 'bid':
             output = model.forward(z, x, legal_actions, flags=flags)

@@ -139,7 +139,7 @@ class Env:
         
     @property
     def _game_infoset(self):
-        return self._env.game_infoset
+        return self._env.game_infoset[self._env.player_rule]
 
     @property
     def _bid_infoset(self):
@@ -272,21 +272,26 @@ def _get_banker_obs_resnet(infoset):
     banker_up_round_play_cards = cards2matrix(infoset.round_play_cards['banker_up'], level=level, major=major)
     banker_down_round_play_cards = cards2matrix(infoset.round_play_cards['banker_down'], level=level, major=major)
     
-    banker_up_last_round_played_cards = cards2matrix(infoset.last_round_played_cards['banker_up'], level=level, major=major)
-    banker_down_last_round_played_cards = cards2matrix(infoset.last_round_played_cards['banker_down'], level=level, major=major)
+    banker_up_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_up'], level=level, major=major)
+    banker_down_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker_down'], level=level, major=major)
     
-    banker_up_mask_cards = infoset.mask_cards['banker_up']
-    banker_down_mask_cards = infoset.mask_cards['banker_down']
+    banker_up_mask_cards = cards2matrix(infoset.mask_cards['banker_up'], level=level, major=major)
+    banker_down_mask_cards = cards2matrix(infoset.mask_cards['banker_down'], level=level, major=major)
     
     play_rights = _get_one_hot_array(infoset.play_rights_seat, 3)
     
-    
-    legal_actions = [[] for _ in range(__WRONG__)]
-    for k, actions in infoset.legal_actions.items():
+    legal_actions = []
+    legal_types = []
+    legal_type2actions = [[] for i in range(__WRONG__)]
+    for tp, actions in enumerate(infoset.legal_actions):
         for act in actions:
-            legal_actions[k].append(cards2matrix(act, level=level, major=major))
-    legal_actions = np.array(legal_actions)
-        
+            act_mtx = cards2matrix(act, level=level, major=major)
+            legal_actions.append(act_mtx)
+            legal_type2actions[tp].append(len(legal_actions)-1)
+            
+        if len(actions) > 0:
+            legal_types.append(_get_one_hot_array(tp, __WRONG__))
+    legal_types = np.hstack(legal_types)
     
     #剩余牌张数
     banker_num_cards_left = _get_one_hot_array(
@@ -304,13 +309,13 @@ def _get_banker_obs_resnet(infoset):
 
     #分数归一化
     bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
-    get_score = _get_one_hot_array(infoset.get_score//5, 40)
-    win_score_distance = _get_one_hot_array(max(0, (infoset.bid_score - infoset.get_score-5)//5), 40)
-    lose_score_distance = _get_one_hot_array(max(0, (infoset.get_score - infoset.bid_score+5)//5), 40)
-    remain_score = _get_one_hot_array((200 - infoset.get_score)//200, 40)
+    game_score = _get_one_hot_array(infoset.game_score//5, 40)
+    win_score_distance = _get_one_hot_array(max(0, (infoset.bid_score - infoset.game_score-5)//5), 40)
+    lose_score_distance = _get_one_hot_array(max(0, (infoset.game_score - infoset.bid_score+5)//5), 40)
+    remain_score = _get_one_hot_array((200 - infoset.game_score)//5, 40)
     score_left = np.hstack((
                         bid_score, 
-                        get_score, 
+                        game_score, 
                         win_score_distance, 
                         lose_score_distance, 
                         remain_score))
@@ -351,6 +356,8 @@ def _get_banker_obs_resnet(infoset):
         'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
         'legal_actions': legal_actions,
+        'legal_types': legal_types,
+        'legal_type2actions': legal_type2actions,
     }
     return obs
 
@@ -372,8 +379,8 @@ def _get_idler_obs_resnet(infoset):
     banker_round_play_cards = cards2matrix(infoset.round_play_cards['banker'], level=level, major=major)
     partner_round_play_cards = cards2matrix(infoset.round_play_cards[partner_position], level=level, major=major)
     
-    banker_last_round_played_cards = cards2matrix(infoset.last_round_played_cards['banker'], level=level, major=major)
-    partner_last_round_played_cards = cards2matrix(infoset.last_round_played_cards[partner_position], level=level, major=major)
+    banker_last_round_played_cards = cards2matrix(infoset.last_round_play_cards['banker'], level=level, major=major)
+    partner_last_round_played_cards = cards2matrix(infoset.last_round_play_cards[partner_position], level=level, major=major)
     
     banker_mask_cards = infoset.mask_cards['banker']
     partner_mask_cards = infoset.mask_cards[partner_position]
@@ -381,9 +388,18 @@ def _get_idler_obs_resnet(infoset):
     play_rights = _get_one_hot_array(infoset.play_rights_seat, 3)
         
     legal_actions = []
-    for j, action in enumerate(infoset.legal_actions):
-        legal_actions.append(cards2matrix(action), level=level, major=major)
-    
+    legal_types = []
+    legal_type2actions = [[] for i in range(__WRONG__)]
+    for tp, actions in enumerate(infoset.legal_actions):
+        for act in actions:
+            act_mtx = cards2matrix(act, level=level, major=major)
+            legal_actions.append(act_mtx)
+            legal_type2actions[tp].append(len(legal_actions)-1)
+            
+        if len(actions) > 0:
+            legal_types.append(_get_one_hot_array(tp, __WRONG__))
+    legal_types = np.hstack(legal_types)
+
     #剩余牌张数
     banker_num_cards_left = _get_one_hot_array(
         infoset.num_cards_left['banker'], 28)
@@ -400,13 +416,13 @@ def _get_idler_obs_resnet(infoset):
 
     #分数归一化
     bid_score = _get_one_hot_array(infoset.bid_score//5, 40)
-    get_score = _get_one_hot_array(infoset.get_score//5, 40)
-    lose_score_distance = _get_one_hot_array(max(0, (infoset.bid_score - infoset.get_score)//5), 40)
-    win_score_distance = _get_one_hot_array(max(0, (infoset.get_score - infoset.bid_score+5)//5), 40)
-    remain_score = _get_one_hot_array((200 - infoset.get_score)//200, 40)
+    game_score = _get_one_hot_array(infoset.game_score//5, 40)
+    lose_score_distance = _get_one_hot_array(max(0, (infoset.bid_score - infoset.game_score)//5), 40)
+    win_score_distance = _get_one_hot_array(max(0, (infoset.game_score - infoset.bid_score+5)//5), 40)
+    remain_score = _get_one_hot_array((200 - infoset.game_score)//5, 40)
     score_left = np.hstack((
                         bid_score, 
-                        get_score, 
+                        game_score, 
                         win_score_distance, 
                         lose_score_distance, 
                         remain_score))
@@ -446,6 +462,8 @@ def _get_idler_obs_resnet(infoset):
         'x': x_no_action.astype(np.int8),
         'z': z.astype(np.int8),
         'legal_actions': legal_actions,
+        'legal_types': legal_types,
+        'legal_type2actions': legal_type2actions,
     }
     return obs
 
@@ -481,9 +499,12 @@ def _get_bid_obs_resnet(infoset):
 
 def _get_cover_obs_resnet(infoset):
     bid_score = infoset.bid_score
-    my_handcards = cards2matrix(infoset.player_hand_cards)
+    major = infoset.major
+    level = infoset.level
     
-    legal_actions = cards2matrix(infoset.player_hand_cards)
+    my_handcards = cards2matrix(infoset.player_hand_cards, major=major, level=level)
+    
+    legal_actions = cards2matrix(infoset.player_hand_cards, major=major, level=level)
     legal_actions = np.expand_dims(legal_actions, axis=0)
     
     x_no_action = np.vstack((

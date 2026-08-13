@@ -95,7 +95,8 @@ class GameEnv(tractors):
         self.game_over = False
 
         self.coving_player_position = 0
-        self.acting_player_position = 0
+        self.player_position = 0
+        self.player_rule = 'banker'
         
         self.bid_infoset = BidInfoSet('bid')
         self.cover_infoset = CoverInfoSet('cover')
@@ -143,6 +144,7 @@ class GameEnv(tractors):
         elif last_stage == 'cover':
             play_pos = env.getBanker()
             
+            #test code
             all_hand_cards = {i:0 for i in range(108)}
             for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
                 hand_cards = env.getPlayerHandCards((play_pos+i)%__PLAYER_COUNT__)
@@ -154,6 +156,7 @@ class GameEnv(tractors):
             for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
                 hand_cards = env.getPlayerHandCards((play_pos+i)%__PLAYER_COUNT__)
                 for c in hand_cards:
+                    #test code
                     if c not in self.mask_cards[r]:
                         pass
                     self.mask_cards[r].remove(c)
@@ -181,38 +184,79 @@ class GameEnv(tractors):
             self.bid_infoset.bid_score = env.getLeastBidScore()
             self.bid_infoset.mask_bid_score = self.bid_infoset.bid_score - 5#可叫分范围
             
-            
         #埋牌阶段
         elif self.stage == "cover":
             self.bid_over = True
             play_pos = env.getPlayerPosition()
             self.cover_infoset.player_hand_cards = env.getPlayerHandCards(play_pos)
             self.cover_infoset.bid_score = env.getLeastBidScore()
+            self.cover_infoset.major = env.getMajorColor()
+            self.cover_infoset.level = env.getLevel()
             self.coving_player_position = play_pos
-                                
-        
-        elif self.stage == 'play':
-            self.cover_over = True                        
+            
+        #出牌准备阶段
+        elif self.stage == "ready":
+            self.cover_over = True
             play_pos = env.getPlayerPosition()
             banker_pos = env.getBanker()
             rule = 'banker'
             if banker_pos != play_pos: rule = 'banker_up' if (play_pos+1)%__PLAYER_COUNT__ == banker_pos else 'banker_down'
             
+            self.game_infoset[rule].major = env.getMajorColor()
+            self.game_infoset[rule].level = env.getLevel()
             self.game_infoset[rule].player_position = rule
-            self.game_infoset[rule].player_hand_cards = env.getPlayerHandCards(play_pos)
             self.game_infoset[rule].public_cards = env.getPublicCards()
-            self.game_infoset[rule].played_cards = env.getPlayedCards(play_pos)
+            self.game_infoset[rule].player_hand_cards = env.getPlayerHandCards(play_pos)
+            
             self.game_infoset[rule].other_hand_cards = env.getPlayedCards((play_pos+1)%__PLAYER_COUNT__) + env.getPlayedCards((play_pos+2)%__PLAYER_COUNT__)
             self.game_infoset[rule].remain_score_cards = self.remain_score_cards[:]
             
+                        
+            self.game_infoset[rule].round_play_cards = {}
+            self.game_infoset[rule].last_round_play_cards = {}
+            self.game_infoset[rule].mask_cards = {}
+            self.game_infoset[rule].num_cards_left = {}
+            self.game_infoset[rule].played_cards = {}
+            
+            
+            for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
+                self.game_infoset[rule].round_play_cards[r] =  self.round_play_cards[r][:]                
+                self.game_infoset[rule].last_round_play_cards[r] =  self.last_round_play_cards[r][:]
+                self.game_infoset[rule].mask_cards[r] =  self.mask_cards[r][:]
+                self.game_infoset[rule].num_cards_left[r] = env.getPlayerLeftHandCards((play_pos+i)%__PLAYER_COUNT__)
+                self.game_infoset[rule].played_cards[r] = env.getPlayedCards((play_pos+i)%__PLAYER_COUNT__)
+                
+            self.game_infoset[rule].play_rights_seat = banker_pos     
+            self.game_infoset[rule].bid_score = env.getLeastBidScore()            
+            self.game_infoset[rule].game_score = 0
+            
+            history_curr = env.getCurrRoundPlayHistory()
+            hold = env.getPlayerHandCards(play_pos)
+            playedCards = env.getLegalPlayCard(history_curr, hold, env.getLevel())
+            self.game_infoset[rule].legal_actions = playedCards
+            
+            self.player_rule = 'banker'
+            
+        elif self.stage == 'play':
+            play_pos = env.getPlayerPosition()
+            banker_pos = env.getBanker()
+            rule = 'banker'
+            if banker_pos != play_pos: rule = 'banker_up' if (play_pos+1)%__PLAYER_COUNT__ == banker_pos else 'banker_down'
+            
             self.game_infoset[rule].major = env.getMajorColor()
             self.game_infoset[rule].level = env.getLevel()
+            self.game_infoset[rule].player_position = rule
+            self.game_infoset[rule].player_hand_cards = env.getPlayerHandCards(play_pos)
+            self.game_infoset[rule].public_cards = env.getPublicCards()
+            self.game_infoset[rule].other_hand_cards = env.getPlayedCards((play_pos+1)%__PLAYER_COUNT__) + env.getPlayedCards((play_pos+2)%__PLAYER_COUNT__)
+            self.game_infoset[rule].remain_score_cards = self.remain_score_cards[:]
             
             
             self.game_infoset[rule].round_play_cards = {}
             self.game_infoset[rule].last_round_play_cards = {}
             self.game_infoset[rule].mask_cards = {}
             self.game_infoset[rule].num_cards_left = {}
+            self.game_infoset[rule].played_cards = {}
             
             #如果是垫牌，说明该玩家已经没有该花色            
             history_curr = env.getCurrRoundPlayHistory()
@@ -230,8 +274,7 @@ class GameEnv(tractors):
                                 self.mask_cards[rule].remove(card)
                         
             for i, r in enumerate(['banker', 'banker_down', 'banker_up']):
-                self.game_infoset[rule].round_play_cards[r] =  self.round_play_cards[r][:]
-                
+                self.game_infoset[rule].round_play_cards[r] =  self.round_play_cards[r][:]                
                 self.game_infoset[rule].last_round_play_cards[r] =  self.last_round_play_cards[r][:]
 
                 for c in response[1]:
@@ -239,12 +282,11 @@ class GameEnv(tractors):
                         self.mask_cards[r].remove(c)
                 self.game_infoset[rule].mask_cards[r] =  self.mask_cards[r][:]
 
-                self.game_infoset[rule].num_cards_left[r] = env.getPlayerLeftHandCards((banker_pos+1)%__PLAYER_COUNT__)
+                self.game_infoset[rule].num_cards_left[r] = env.getPlayerLeftHandCards((banker_pos+i)%__PLAYER_COUNT__)
+                self.game_infoset[rule].played_cards[r] = env.getPlayedCards((play_pos+i)%__PLAYER_COUNT__)
                 
-            self.game_infoset[rule].play_rights_seat = env.getFristPlaySeat()
-            
-            self.game_infoset[rule].bid_score = env.getLeastBidScore()
-            
+            self.game_infoset[rule].play_rights_seat = env.getFristPlaySeat()            
+            self.game_infoset[rule].bid_score = env.getLeastBidScore()            
             self.game_infoset[rule].game_score = env.getGameScore()
             
             
@@ -252,8 +294,9 @@ class GameEnv(tractors):
             playedCards = env.getLegalPlayCard(history_curr, hold, env.getLevel())
             self.game_infoset[rule].legal_actions = playedCards
             
-            self.acting_player_position = play_pos
-                        
+            self.player_position = play_pos
+            self.player_rule = rule
+            
         
         #一回合结束
         elif self.stage == 'roundend':

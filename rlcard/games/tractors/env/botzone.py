@@ -1,3 +1,4 @@
+import enum
 import random, os, signal
 # from utils import *
 import json
@@ -1734,8 +1735,8 @@ class tractorGame():
             all_hands[__TRACTOR__] = ret_tractor.get(__TRACTOR__, [])
             all_hands[__SUSPECT__] = ret_suspect.get(__SUSPECT__, [])
             
-            for k,v in all_hands.items():
-                all_hands[k] = self.Pokers2Num(v, deck.copy())
+            for k,pokers in enumerate(all_hands):
+                all_hands[k] = self.PokerList2Num(pokers, deck.copy())
                 
             return all_hands
         
@@ -2057,7 +2058,7 @@ class tractorGame():
                         self.player_hand_cards[self.globalInfo['bidsseat']].extend(self.globalInfo["publiccard"])
                         self.globalInfo["stage"] = "cover"
                         major_color = __SUITSET__[response[2]]
-                        newbanking = {'major': major_color, "banker": bid_seat}
+                        newbanking = {'major': major_color, "banker": self.globalInfo["playerpos"]}
                         self.globalInfo["banking"] = newbanking
                         self.setMajor(major_color, self.globalInfo["level"])
                         
@@ -2086,10 +2087,10 @@ class tractorGame():
                 
                 
                 
-                self.globalInfo["stage"] = "startplay"
+                self.globalInfo["stage"] = "ready"
             
-            #开始比赛
-            elif self.globalInfo["stage"] == 'startplay':
+            # #开始比赛
+            elif self.globalInfo["stage"] == 'ready':
                 self.globalInfo["stage"] = 'play'
                 
             #一回合结束
