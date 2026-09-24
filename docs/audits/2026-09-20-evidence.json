@@ -1,0 +1,481 @@
+{
+  "logs": {
+    "winrates": {
+      "banker_vs_random": {
+        "checkpoints": 37,
+        "first_step": 1671000,
+        "last_step": 61116000,
+        "first5": {
+          "games": 624,
+          "rate": 0.30448717948717946
+        },
+        "last5": {
+          "games": 532,
+          "rate": 0.42105263157894735
+        },
+        "first_rate": 0.33064516129032256,
+        "last_rate": 0.5287356321839081,
+        "last_games": 87
+      },
+      "banker_vs_rule": {
+        "checkpoints": 37,
+        "first_step": 1671000,
+        "last_step": 61116000,
+        "first5": {
+          "games": 740,
+          "rate": 0.24054054054054055
+        },
+        "last5": {
+          "games": 778,
+          "rate": 0.2467866323907455
+        },
+        "first_rate": 0.2695035460992908,
+        "last_rate": 0.24074074074074073,
+        "last_games": 162
+      },
+      "idler_vs_random": {
+        "checkpoints": 37,
+        "first_step": 1671000,
+        "last_step": 61116000,
+        "first5": {
+          "games": 647,
+          "rate": 0.7619783616692427
+        },
+        "last5": {
+          "games": 669,
+          "rate": 0.8430493273542601
+        },
+        "first_rate": 0.6637168141592921,
+        "last_rate": 0.8260869565217391,
+        "last_games": 138
+      },
+      "idler_vs_rule": {
+        "checkpoints": 37,
+        "first_step": 1671000,
+        "last_step": 61116000,
+        "first5": {
+          "games": 717,
+          "rate": 0.6429567642956764
+        },
+        "last5": {
+          "games": 790,
+          "rate": 0.7025316455696202
+        },
+        "first_rate": 0.6419753086419753,
+        "last_rate": 0.69375,
+        "last_games": 160
+      }
+    },
+    "losses": {
+      "banker": {
+        "loss_tp_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.23113979399204254,
+          "last": 0.06365185230970383,
+          "maximum": 4.8502326011657715,
+          "nonfinite_count": 0
+        },
+        "loss_act_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.22222554683685303,
+          "last": 0.05995149910449982,
+          "maximum": 10.055917739868164,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_target": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 1.6313557624816895,
+          "last": 0.5898053050041199,
+          "maximum": 1.6313557624816895,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_value": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.15300297737121582,
+          "last": 0.04757744446396828,
+          "maximum": 0.26944607496261597,
+          "nonfinite_count": 0
+        }
+      },
+      "banker_down": {
+        "loss_tp_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.2515123784542084,
+          "last": 0.06050276756286621,
+          "maximum": 26.71800994873047,
+          "nonfinite_count": 0
+        },
+        "loss_act_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.3290789723396301,
+          "last": 0.0650649145245552,
+          "maximum": 11.862981796264648,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_target": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 1.7825170755386353,
+          "last": 0.6240357756614685,
+          "maximum": 1.7825170755386353,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_value": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.16682544350624084,
+          "last": 0.05196055397391319,
+          "maximum": 0.40957972407341003,
+          "nonfinite_count": 0
+        }
+      },
+      "banker_op": {
+        "loss_tp_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.29553845524787903,
+          "last": 0.062392622232437134,
+          "maximum": 1.5538092851638794,
+          "nonfinite_count": 0
+        },
+        "loss_act_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.2837328612804413,
+          "last": 0.06411881744861603,
+          "maximum": 83.57373046875,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_target": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 1.699681043624878,
+          "last": 0.5313778519630432,
+          "maximum": 1.699681043624878,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_value": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.24117739498615265,
+          "last": 0.04086575284600258,
+          "maximum": 0.24117739498615265,
+          "nonfinite_count": 0
+        }
+      },
+      "banker_up": {
+        "loss_tp_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.239198237657547,
+          "last": 0.0625193864107132,
+          "maximum": 24.062366485595703,
+          "nonfinite_count": 0
+        },
+        "loss_act_loss": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.272689551115036,
+          "last": 0.06521502137184143,
+          "maximum": 504.3212890625,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_target": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 1.745058536529541,
+          "last": 0.5234217643737793,
+          "maximum": 1.745058536529541,
+          "nonfinite_count": 0
+        },
+        "loss_strategy_value": {
+          "count": 126,
+          "first_step": 120000,
+          "last_step": 15120000,
+          "first": 0.13487069308757782,
+          "last": 0.049312837421894073,
+          "maximum": 0.16951057314872742,
+          "nonfinite_count": 0
+        }
+      }
+    },
+    "strategy_snapshots": {
+      "banker": {
+        "rows": 5,
+        "first_frame": 62467800,
+        "last_frame": 62476800,
+        "selection_mean": [
+          0.08533333241939545,
+          0.2173333466053009,
+          0.13499999046325684,
+          0.2849999964237213,
+          0.2096666842699051,
+          0.03933333232998848,
+          0.028333332389593124
+        ],
+        "label_mean": [
+          0.07100000232458115,
+          0.1823333352804184,
+          0.14633333683013916,
+          0.34800001978874207,
+          0.21133334934711456,
+          0.01666666939854622,
+          0.024333331733942032
+        ]
+      },
+      "banker_down": {
+        "rows": 6,
+        "first_frame": 62467200,
+        "last_frame": 62478000,
+        "selection_mean": [
+          0.09777778387069702,
+          0.20333331823349,
+          0.13750000298023224,
+          0.301111102104187,
+          0.19750000536441803,
+          0.03777778148651123,
+          0.02500000037252903
+        ],
+        "label_mean": [
+          0.06833333522081375,
+          0.17861109972000122,
+          0.13055555522441864,
+          0.3822222054004669,
+          0.20472222566604614,
+          0.018333332613110542,
+          0.017222223803400993
+        ]
+      },
+      "banker_op": {
+        "rows": 5,
+        "first_frame": 62466600,
+        "last_frame": 62476200,
+        "selection_mean": [
+          0.07900001108646393,
+          0.23333334922790527,
+          0.14866666495800018,
+          0.27399998903274536,
+          0.19900000095367432,
+          0.036000002175569534,
+          0.030000001192092896
+        ],
+        "label_mean": [
+          0.07133333384990692,
+          0.1863333284854889,
+          0.15299999713897705,
+          0.35333335399627686,
+          0.19366666674613953,
+          0.01599999889731407,
+          0.026333335787057877
+        ]
+      },
+      "banker_up": {
+        "rows": 5,
+        "first_frame": 62466000,
+        "last_frame": 62477400,
+        "selection_mean": [
+          0.06866666674613953,
+          0.2150000035762787,
+          0.14433333277702332,
+          0.3110000193119049,
+          0.19066666066646576,
+          0.03666666895151138,
+          0.033666666597127914
+        ],
+        "label_mean": [
+          0.07500000298023224,
+          0.15533334016799927,
+          0.1433333456516266,
+          0.37833333015441895,
+          0.2110000103712082,
+          0.01833333447575569,
+          0.018666666001081467
+        ]
+      }
+    }
+  },
+  "model": {
+    "bid_argmax": {
+      "scores": [
+        0.10000000149011612,
+        0.8999999761581421,
+        0.20000000298023224
+      ],
+      "selected": 0,
+      "correct": 1
+    },
+    "play_parameter_count": 110560792,
+    "encoder_parameter_count": 30769336,
+    "strategy_output_max_difference": 0.0,
+    "strategy_type_max_difference": 0.0,
+    "train_mode_candidate_batch_max_difference": 0.03882686048746109,
+    "eval_mode_candidate_batch_max_difference": 3.8743019104003906e-07,
+    "hrl_agent_default_training": true,
+    "cover_negative_reward": {
+      "output_at_zero_logits": 0.5,
+      "loss_at_zero_logits": 0.15000000596046448,
+      "infimum_for_8_selected_cards": 0.06666666666666667,
+      "selected_logit_gradient": 0.006250000558793545
+    }
+  },
+  "actor": {
+    "games": 5,
+    "bid_decisions": 500,
+    "bid": {
+      "expected_rewards_for_inputs": [
+        0.1,
+        0.2,
+        0.3,
+        0.4
+      ],
+      "actual_targets": [
+        0.20000000298023224,
+        0.30000001192092896,
+        0.4000000059604645,
+        0.5
+      ],
+      "inputs_are_games_1_to_4": true
+    },
+    "cover": {
+      "expected_rewards_for_inputs": [
+        0.1,
+        0.2,
+        0.3,
+        0.4
+      ],
+      "actual_targets": [
+        0.20000000298023224,
+        0.30000001192092896,
+        0.4000000059604645,
+        0.5
+      ],
+      "inputs_are_games_1_to_4": true
+    }
+  },
+  "environment": {
+    "first_play_mask_recovers_hidden_hands": {
+      "banker_down": true,
+      "banker_op": true,
+      "banker_up": true
+    },
+    "unknown_bottom_recovered": true,
+    "completed_games": 20,
+    "random_play_actions": 1591,
+    "action_types": {
+      "1": 929,
+      "2": 252,
+      "4": 149,
+      "5": 259,
+      "3": 2
+    },
+    "stale_infoset_after_roundend": {
+      "trials": 378,
+      "different_seat": 296
+    },
+    "discard_updates_wrong_role": {
+      "acting_role": "banker_op",
+      "changed_masks": [
+        "banker_up"
+      ],
+      "next_role": "banker_up"
+    },
+    "last_trick_reward_over_one": {
+      "banker": -1.0625,
+      "banker_op": -1.0625,
+      "banker_up": 1.0625,
+      "banker_down": 1.0625
+    }
+  },
+  "engine_edges": {
+    "ruff_with_lead_suit_still_in_hand": {
+      "lead": [
+        "h3",
+        "h3",
+        "h4",
+        "h4"
+      ],
+      "hand": [
+        "h6",
+        "s3",
+        "s3",
+        "s4",
+        "s4"
+      ],
+      "generated": [
+        "s3",
+        "s3",
+        "s4",
+        "s4"
+      ],
+      "validator_error": 0
+    },
+    "failed_throw_penalty_lost": {
+      "immediately_after_throw": 20,
+      "score_after_throw": 0,
+      "final_trick_reward": 0,
+      "final_game_score": 0
+    },
+    "series_reset": {
+      "games": 300,
+      "first_finalend_game": 36,
+      "finalend_count": 156,
+      "first_30_levels": [
+        "2",
+        "2",
+        "3",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "4",
+        "4",
+        "5",
+        "5",
+        "6",
+        "5",
+        "7",
+        "5",
+        "8",
+        "6",
+        "8",
+        "9",
+        "J",
+        "Q",
+        "6",
+        "7",
+        "8",
+        "0",
+        "Q",
+        "J",
+        "K"
+      ],
+      "last_100_level_counts": {
+        "A": 100
+      },
+      "level_2_count_after_first_series": 0
+    }
+  }
+}

@@ -1,28 +1,31 @@
 from rlcard.games.tractors.dmc import parser
-from rlcard.games.tractors.dmc.dmc import train
-import os, platform
+import platform
 import torch
-import random
-import numpy as np
+
 
 def clear_env_list():
     import requests
     print(requests.post('http://192.168.112.4:8999/clear_env'))
+
+def evaluateModel(flags):
+    from rlcard.games.tractors.eval.evaluate_training import evaluate_training_models
+    flags.log_print = True
+    flags.evaluate_device = 0
+    # flags.print_game_log = True
+    evaluate_training_models(14997000, flags)
+
+def showPlt(flags):
+    from rlcard.games.tractors.eval.plot_results import showplt
+    showplt()
+
+def train(flags):
+    from rlcard.games.tractors.dmc.dmc import train
+    train(flags)
     
 if __name__ == '__main__':
-    # 设置 random 模块的随机数种子
-    rseed = 78420
-    random.seed(rseed)
-    # 设置 NumPy 的随机数种子
-    np.random.seed(rseed)
-    # 设置 PyTorch 的随机数种子
-    torch.manual_seed(rseed)
-    # 为所有GPU设置随机数种子
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(rseed)
-    
+   
     flags = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = flags.gpu_devices
+    # os.environ["e"] = "1,0"#flags.gpu_devices
     
     #如果是linxu 系统
     is_linux = platform.system() == 'Linux'
@@ -41,3 +44,5 @@ if __name__ == '__main__':
         flags.training_device = 'cpu'
         
     train(flags)
+    # showPlt(flags)
+    # evaluateModel(flags)

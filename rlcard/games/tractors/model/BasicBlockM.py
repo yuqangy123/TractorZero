@@ -6,12 +6,23 @@ import math
 '''
 手牌特征提取网络Resnet
 
-[b, 2, 14, 4] 是手牌矩阵
+[b, 2, 4, 15] 是手牌矩阵
 示例：
 self.resnet_my_card = ResNet(ResidualBlock, [2, 2, 2, 2], in_channels=2, kernel_size=3)
 '''
 
 
+class ResidualLinearBlock(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.fc = nn.Linear(in_dim, out_dim, bias=False)
+        self.activation = nn.LeakyReLU(inplace=True)
+        self.skip = nn.Linear(in_dim, out_dim, bias=False) if in_dim != out_dim else nn.Identity()
+        
+    def forward(self, x):
+        residual = self.skip(x)  # 跳跃连接
+        x = self.activation(self.fc(x))
+        return x + residual  # 相加
 
 
 class ResidualBlock(nn.Module):
@@ -55,14 +66,15 @@ class ResNet(nn.Module):
         # self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=padding)
 
         # 残差层
-        self.reslayers = []
+        self.reslayers = nn.ModuleList()
         for i in range(min(len(layers), len(hidden_channels))):
             self.reslayers.append(self._make_layer(block, hidden_channels[i], layers[i], stride=stride))
 
         # 全局平均池化和全连接层
         # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         #融合卷积层
-        self.conv_fusion = nn.Linear(hidden_channels[len(hidden_channels)-1]*4*15, out_dim)#nn.Conv2d(hidden_channels[len(hidden_channels)-1], out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
+        self.conv_fusion = nn.Linear(hidden_channels[len(hidden_channels)-1]*4*15, out_dim)
+        
         self._init_lstm_weights()
 
     def toDevice(self, device):

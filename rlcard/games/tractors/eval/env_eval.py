@@ -3,11 +3,10 @@ Here, we wrap the original environment to make it easier
 to use. When a game is finished, instead of mannualy reseting
 the environment, we do it automatically.
 """
-
+#改编自env_utils.py
 import torch
-from .utils import *
 
-def _format_observation(obs, device):
+def _format_observation(obs):
     """
     A utility function to process observations and
     move them to CUDA.
@@ -36,18 +35,16 @@ def _format_observation(obs, device):
            }
     return position, obs, legal_actions
 
-class Environment:
+class EnvironmentEval:
     def __init__(self, env, device):
         """ Initialzie this environment wrapper
         """
         self.env = env
         self.device = device
 
-    def initial(self, model, device, flags=None):
+    def initial(self, flags=None):
         obs = self.reset()
-        initial_position, initial_obs, legal_actions = _format_observation(obs, self.device)
-        self._model = model
-        self._device = device
+        initial_position, initial_obs, legal_actions = _format_observation(obs)
         self._flags = flags
         
         # initial_done = torch.ones(1, 1, dtype=torch.bool)
@@ -61,7 +58,7 @@ class Environment:
         obs_ori,  done, = self.env.step(action)
 
         if obs_ori:
-            position, obs, legal_actions = _format_observation(obs_ori, self.device)
+            position, obs, legal_actions = _format_observation(obs_ori)
         # reward = torch.tensor(reward).view(1, 1)
         # done = torch.tensor(done).view(1, 1)
 
@@ -69,10 +66,19 @@ class Environment:
             step_reward = self._get_step_reward()
             game_reward = self._get_reward()
             game_score = self._get_game_score()
-            # 本墩元数据必须在 reset 之前冻结，否则会被新一局覆盖
-            step_meta = self.env._get_step_meta()
+            #最终结算就评估完了一局
+            if self.env._stage == "finalend":
+                return 0, {}, dict(
+                    done=done,
+                    stage = self.env._stage,
+                    step_reward = step_reward,
+                    game_reward = game_reward,
+                    game_score = game_score,
+                )
+            
+            
             obs = self.reset()
-            position, obs, legal_actions = _format_observation(obs, self._device)
+            position, obs, legal_actions = _format_observation(obs)
             env_output = dict(
                 done=done,
                 legal_actions = legal_actions,
@@ -80,7 +86,6 @@ class Environment:
                 step_reward = step_reward,
                 game_reward = game_reward,
                 game_score = game_score,
-                step_meta = step_meta,
             )
         else:
             env_output = dict(
@@ -90,7 +95,6 @@ class Environment:
             )
             if env_output['stage'] == 'roundend':
                 env_output['step_reward'] = self._get_step_reward()
-                env_output['step_meta'] = self.env._get_step_meta()
             if position in ['banker', 'banker_op', 'banker_down', 'banker_up']:
                 env_output['legal_types'] = obs_ori['legal_types']
             
@@ -107,25 +111,15 @@ class Environment:
     
     def _get_reward(self):
         return self.env._get_reward()
-    
+        
     def _get_game_score(self):
         return self.env._get_game_score()
     
-    def _get_round_score(self):
-        return self.env._get_round_score()
-
-    def _get_round_score_poke(self):
-        return self.env._get_round_score_poke()
-
-    def _get_last_winner_role(self):
-        return self.env._get_last_winner_role()
-
-    def _get_round_lead_role(self):
-        return self.env._get_round_lead_role()
-
-    def _get_is_last_round(self):
-        return self.env._get_is_last_round()
+    def _get_infosets(self):
+        return self.env._get_infosets()
     
     def _get_last_bid_rule(self):
         return self.env._get_last_bid_rule()
+    
+    
     

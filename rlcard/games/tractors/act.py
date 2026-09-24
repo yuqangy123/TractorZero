@@ -2,9 +2,12 @@ from rlcard.games.tractors.env.env import Env
 # from .env.env import Env
 from .env.env_utils import Environment#*
 from .env.utils import *
+from .model.play_model import compute_strategy_targets
 import torch
 import traceback
 import numpy as np
+import os
+import time
 
 from rlcard.optimizer.radam import RAdam
 
@@ -16,8 +19,9 @@ def get_batch_play(b_queues, flags, lock):
         buffer.append(b_queue.get())
     batch = {
         key: torch.stack([m[key] for m in buffer], dim=1)
-        for key in ["target_adp", "target_wp", "play_action_type", "play_action_type_mask",
-                    "play_action", "obs_z", "obs_x"]
+        for key in ["target_adp", "target_wp", "obs_action_type_x", "obs_action_type_z",
+                    "obs_z", "obs_x", "obs_strategy_z", "obs_strategy_x",
+                    "strategy_action", "strategy_target"]
     }
     del buffer
     return batch
@@ -30,8 +34,7 @@ def get_batch_bid(b_queues, flags, lock):
         buffer.append(b_queue.get())
     batch = {
         key: torch.stack([m[key] for m in buffer], dim=1)
-        for key in ["bid_return", "bid_action_mask", "bid_score", "bid_suit",
-                    "obs_z", "obs_x"]
+        for key in ["target_wp", "obs_z", "obs_x"]
     }
     del buffer
     return batch
@@ -44,7 +47,7 @@ def get_batch_cover(b_queues, flags, lock):
         buffer.append(b_queue.get())
     batch = {
         key: torch.stack([m[key] for m in buffer], dim=1)
-        for key in ["cover_public_score", "cover_return", "cover_action_mask", "cover_action",
+        for key in ["target_wp", "cover_action_mask",
                     "obs_z", "obs_x"]
     }
     del buffer
@@ -68,12 +71,12 @@ def create_optimizers(flags, learner_model):
 def create_env(flags):
     return Env(flags.objective)
 
-def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermodel, flags):
-    positions = ["banker", 'banker_op', 'banker_up', 'banker_down', 'bid', 'cover']
-    
+def act(actor_index, device, batch_queues, model, banker_win_counter, idler_win_counter, exp_epsilon_shared, flags=None):
+    positions = ['banker', 'banker_op', 'banker_up', 'banker_down', 'bid', 'cover']
+        
     try:
         T = flags.unroll_length
-        print(f'Device {str(device)} Actor {i} started.')
+        print(f'Device {str(device)} Actor {actor_index} started.')
 
         env = create_env(flags)
         env = Environment(env, device)
@@ -85,143 +88,219 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
         
         obs_z_buf = {p: [] for p in positions}
         obs_x_buf = {p: [] for p in positions}
-        
-        play_action_type_buf = {p: [] for p in positions}
-        play_action_type_mask_buf = {p: [] for p in positions}
-        play_action_buf = {p: [] for p in positions}
+        obs_action_type_z_buf = {p: [] for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
+        obs_action_type_x_buf = {p: [] for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
+        # 策略头的状态级输入（不含牌型候选），与推理时同一表示
+        obs_strategy_z_buf = {p: [] for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
+        obs_strategy_x_buf = {p: [] for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
+        # 必须记录行为策略（含 epsilon 探索），不能由 learner 的当前 argmax 替换。
+        strategy_action_buf = {p: [] for p in __PLAY_ROLES__}
+                
+        # play_action_type_mask_buf = {p: [] for p in positions}
         target_adp_buf = {p: [] for p in positions}
         target_wp_buf = {p: [] for p in positions}
+        strategy_target_buf = {p: [] for p in ['banker', 'banker_op', 'banker_up', 'banker_down']}
         
-        bid_return_buf = {"bid": []}
-        bid_action_mask_buf = {"bid": []}
-        bid_score_buf = {"bid": []}
-        bid_suit_buf = {"bid": []}
+        # bid_return_buf = {"bid": []}
+        bid_action_mask = None
+        bid_obs_z = None
+        bid_obs_x = None
+        
         
         cover_public_score_buf = {"cover": []}
         cover_return_buf = {"cover": []}
         cover_action_mask_buf = {"cover": []}
-        cover_action_buf = {"cover": []}
-        
+        cover_action_mask = None
+        cover_obs_z = None
+        cover_obs_x = None
         size = {p: 0 for p in positions}
         
         position, obs, env_output = env.initial(model, device, flags=flags)
-        # pid = threading.get_ident()
         
         while True:
+            flags.exp_epsilon = exp_epsilon_shared.value
             while True:
-                                 
-                if position in ['banker', 'banker_op', 'banker_up', 'banker_down']:
+                if position in __PLAY_ROLES__:
+                    _ti = time.perf_counter()
                     with torch.no_grad():
-                        agent_output = model.forward(position, obs['z'], obs['x'], env_output['legal_actions'], legal_types=env_output['legal_types'], flags=flags)       
+                        agent_output = model.play(position, obs['z'], obs['x'], obs['z_batch'], obs['x_batch'], env_output['legal_actions'], env_output['legal_types'], flags=flags)       
                     
-                    _action_type = agent_output['action_type'].cpu().detach().item()
-                    _action_idx = agent_output['action'].cpu().detach().item()
-                    legal_type_actions = [actions[1] for i, actions in enumerate(env_output['legal_types']) if actions[0] == _action_type]
-                    action = legal_type_actions[_action_idx]
+                    action_type_index = agent_output['action_type_index']
+                    action = agent_output['action']
+                    # 策略头的状态级输入（不含牌型候选），与推理时同一表示
+                    obs_strategy_z_buf[position].append(obs['z'].detach().cpu())
+                    obs_strategy_x_buf[position].append(obs['x'].detach().cpu())
+                    strategy_action_buf[position].append(agent_output['strategy'].detach().cpu())
+                    pred_action_type = env_output['legal_types'][action_type_index]
                     
-                    play_action_type_buf[position].append(_action_type)
-                    play_action_type_mask_buf[position].append(torch.from_numpy(np.array([len(actions) for actions in env_output['legal_actions']])))
-                    play_action_buf[position].append(torch.from_numpy(action))
-                    action = [action, _action_type]
+                    obs_action_type_z_buf[position].append(obs['z_batch'][action_type_index].detach().cpu())
+                    obs_action_type_x_buf[position].append(obs['x_batch'][action_type_index].detach().cpu())
+                    
+                    obs_z_buf[position].append(obs['z_batch'][action_type_index].detach().cpu())
+                    obs_x = torch.cat((torch.from_numpy(env_output['legal_actions'][pred_action_type][action]), obs['x_batch'][action_type_index]), axis=0)
+                    obs_x_buf[position].append(obs_x)
+                    size[position] += 1
+                    
+                    action = [matrix2cards(env_output['legal_actions'][pred_action_type][action]), pred_action_type]
+                    
+                elif position == 'bid':
+                    _ti = time.perf_counter()
+                    with torch.no_grad():
+                        agent_output = model.bid(obs['z_batch'], obs['x_batch'], flags=flags)
+                    action_index = agent_output['action'].cpu().detach().item()
+                    legal_actions = env_output['legal_actions']
+                    action = [legal_actions[action_index][0]]#0不叫，1-4花色，5无主
+                    bid_cards = legal_actions[action_index][1]
+                    bid_obs_z = obs['z']
+                    bid_obs_x = torch.cat((torch.from_numpy(cards2matrix(bid_cards)), obs['x']), dim=0).to(torch.int8)
+                    
+                elif position == 'cover':
+                    _ti = time.perf_counter()
+                    with torch.no_grad():
+                        agent_output = model.cover(obs['z_batch'], obs['x_batch'], flags=flags)
+                    logits = agent_output['action'].cpu().detach()
+                    legal_actions = env_output['legal_actions']
+                    _legal_actions = legal_actions.flatten()
+                    f_action = _legal_actions * logits[0]
+                    values, indices = torch.topk(f_action, k=8)
+                    action = torch.zeros_like(_legal_actions)
+                    action[indices] = 1
+                    action = action.reshape(legal_actions.shape)
+                    cover_action_mask = action  # 被埋的8张牌 one-hot [2,4,15]，作为回归目标掩码
+                    action = [matrix2cards(action)]
+                    cover_obs_z = obs['z']
+                    cover_obs_x = obs['x']
+                    
                     
                 else:
-                    with torch.no_grad():
-                        agent_output = model.forward(position, obs['z'], obs['x'], env_output['legal_actions'], flags=flags)      
-                         
-                    if position == 'bid':
-                        action = agent_output['action'].cpu().detach().item()
-                        suit = agent_output['suit'].cpu().detach().item()
-                        bid_action_mask_buf['bid'].append(env_output['legal_actions'].cpu().detach())
-                        bid_score_buf['bid'].append(action)
-                        bid_suit_buf['bid'].append(suit)
-                        action = [action*5, suit]#1个值代表5分
-                        
-                    elif position == 'cover':
-                        action = agent_output['action'].cpu().detach()
-                        cover_action_mask_buf['cover'].append(env_output['legal_actions'].cpu().detach())
-                        cover_action_buf['cover'].append(action)
-                        action = matrix2cards(action.squeeze(dim=0), major=env.env._major, level=env.env._level)
-                        action = [action]
-                    else:
-                        raise ValueError(f"unkown position:{position}")
+                    raise ValueError(f"unkown position:{position}")
+                
+                position, obs, env_output = env.step(action)
+                
+                if 'step_reward' in env_output:
+                    step_reward = env_output['step_reward']
+                    # 本墩元数据已在环境 reset 之前冻结（env_utils），据此按动作特征生成互斥策略标签
+                    step_meta = env_output.get('step_meta')
+                    for rule in __PLAY_ROLES__:
+                        target_adp_buf[rule].append(step_reward[rule])
+                        strategy_target_buf[rule].append(torch.tensor(
+                            compute_strategy_targets(step_meta, rule), device='cpu'))
                     
-                
-                obs_z_buf[position].append(obs['z'].detach().cpu())
-                obs_x_buf[position].append(obs['x'].detach().cpu())
-                size[position] += 1
-                
-                position, obs, env_output = env.step(action, model, device, flags=flags)
-                
-                if env_output['stage'] == 'roundend' or env_output['stage'] == 'gameend':
-                    step_reward = env._get_step_reward()
-                    target_adp_buf[position].append([step_reward['banker'], step_reward['banker_down'], step_reward['banker_op'], step_reward['banker_up']])
+                #roundend后step一次切换状态
+                if env_output['stage'] == 'roundend':
+                    position, obs, env_output = env.step(action)
                     
-                if env_output['done']:
-                    game_reward = env._get_reward()
-                    for p in ['banker', 'banker_op', 'banker_up', 'banker_down']:
+                if 'game_reward' in env_output:
+                    game_reward = env_output['game_reward']
+
+                    # 先登记本局 bid/cover 样本，再统一补 reward：
+                    # 若顺序颠倒，补 reward 时 size 尚未计入本局样本，diff 会少算 1，
+                    # 导致 bid/cover 观测配到下一局的 game_reward（整体错位一局）。
+                    obs_z_buf['bid'].append(bid_obs_z)
+                    obs_x_buf['bid'].append(bid_obs_x)
+                    size['bid'] += 1
+
+                    # cover_public_score_buf['cover'].append(game_reward['cover_public_score'])
+                    # cover_return_buf['cover'].append(game_reward['cover'])
+                    cover_action_mask_buf['cover'].append(cover_action_mask)
+                    obs_z_buf['cover'].append(cover_obs_z)
+                    obs_x_buf['cover'].append(cover_obs_x)
+                    size['cover'] += 1
+
+                    for p in positions:
                         diff = size[p] - len(target_wp_buf[p])
                         if diff > 0:
                             # done_buf[p].extend([False for _ in range(diff - 1)])
                             # done_buf[p].append(True)
                             wp_return = game_reward[p]
+                            # 出牌角色的终局 reward 为级数差 ±{1,2,3}，统一除以 3 归一化到 [-1,1]，
+                            # 同时作为上层 Q(s, strategy) 的无折扣终局 Monte Carlo 回报。
+                            #放在组装点归一化的原因：评估逻辑依赖`game_reward` 的 原始级数差 ：`final_level_info` 在 report.py:81 用`int(...)` 取整、 plot_results.py 直接当级数差画图。若在源头`/3` ，会被`int()` 截断成 0，破坏评估结果。
+                            if p in __PLAY_ROLES__: wp_return = wp_return / 3.0
                             target_wp_buf[p].extend([wp_return for _ in range(diff)])
-                            
-                    bid_return_buf['bid'].append(game_reward['bid'])
-                    cover_public_score_buf['cover'].append(game_reward['cover_public_score'])
-                    cover_return_buf['cover'].append(game_reward['cover'])
+                    
+                    
+                    #统计双方胜率
+                    if game_reward['banker'] > 0: 
+                        with banker_win_counter.get_lock():
+                            banker_win_counter.value += 1
+                    else:
+                        with idler_win_counter.get_lock():
+                            idler_win_counter.value += 1
                     break
-
-            for p in ['banker', 'banker_op', 'banker_up', 'banker_down']:
+            
+            fit_buff = False
+            for p in __PLAY_ROLES__:
                 if size[p] > T:
+                    fit_buff = True
                     batch_queues[p].put({
                         # "done": torch.stack(
-                        #     [torch.tensor(ndarr, device="cpu") for ndarr in done_buf[p][:T]]),
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in done_buf[rule][:T]]),
                         "target_adp": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in target_adp_buf[p][:T]]),
                         "target_wp": torch.stack(
                             [torch.tensor(ndarr, device="cpu") for ndarr in target_wp_buf[p][:T]]),
-                        "play_action_type": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in play_action_type_buf[p][:T]]),
-                        "play_action_type_mask": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in play_action_type_mask_buf[p][:T]]),                        
-                        "play_action": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in play_action_buf[p][:T]]),
+                        "obs_action_type_x": torch.stack(obs_action_type_x_buf[p][:T]),
+                        "obs_action_type_z": torch.stack(obs_action_type_z_buf[p][:T]),
+                        # "play_action_type_mask": torch.stack(
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in play_action_type_mask_buf[p][:T]]),                        
                         "obs_z": torch.stack(
                             obs_z_buf[p][:T]),
                         "obs_x": torch.stack(
                             obs_x_buf[p][:T]),
+                        "obs_strategy_z": torch.stack(obs_strategy_z_buf[p][:T]),
+                        "obs_strategy_x": torch.stack(obs_strategy_x_buf[p][:T]),
+                        "strategy_action": torch.stack(strategy_action_buf[p][:T]),
+                        "strategy_target": torch.stack(strategy_target_buf[p][:T]),
                     })
                     
                     target_adp_buf[p] = target_adp_buf[p][T:]
                     target_wp_buf[p] = target_wp_buf[p][T:]
-                    play_action_type_buf[p] = play_action_type_buf[p][T:]
-                    play_action_type_mask_buf[p] = play_action_type_mask_buf[p][T:]                    
-                    play_action_buf[p] = play_action_buf[p][T:]
+                    obs_action_type_x_buf[p] = obs_action_type_x_buf[p][T:]
+                    obs_action_type_z_buf[p] = obs_action_type_z_buf[p][T:]
+                    # play_action_type_mask_buf[p] = play_action_type_mask_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
                     obs_x_buf[p] = obs_x_buf[p][T:]
+                    obs_strategy_z_buf[p] = obs_strategy_z_buf[p][T:]
+                    obs_strategy_x_buf[p] = obs_strategy_x_buf[p][T:]
+                    strategy_action_buf[p] = strategy_action_buf[p][T:]
+                    strategy_target_buf[p] = strategy_target_buf[p][T:]
                     size[p] -= T
+            
+            if fit_buff:        
+                # 定期释放 CUDA 缓存并打印显存占用（区分缓存碎片化 vs 真实泄露）
+                if flags.training_device != 'cpu' and torch.cuda.is_available():
+                    _dev = torch.device('cuda:' + str(flags.training_device))
+                    _alloc = torch.cuda.memory_allocated(_dev)
+                    _resvd = torch.cuda.memory_reserved(_dev)
+                    
+                    # print(f'act{actor_index} pid:{os.getpid() }, _alloc: {_alloc/1e9:.2f}GB,  _resvd: {_resvd/1e9:.2}GB')
+                                                
+                    #如果_resvd 大于 _alloc 3G，说明有缓存碎片化问题
+                    if _resvd > 3 * 1e9:
+                        print(f'actor{actor_index} Warning: _resvd is {_resvd}, possible memory leak')
+                        torch.cuda.empty_cache()
                     
             for p in ['cover']:
                 if size[p] > T:
                     batch_queues[p].put({
-                        "cover_action_mask": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_action_mask_buf[p][:T]]),
-                        "cover_public_score": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_public_score_buf[p][:T]]),
-                        "cover_return": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_return_buf[p][:T]]),
-                        "cover_action": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in cover_action_buf[p][:T]]),          
+                        "target_wp": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in target_wp_buf[p][:T]]),
+                        "cover_action_mask": torch.stack(cover_action_mask_buf[p][:T]),
+                        # "cover_public_score": torch.stack(
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in cover_public_score_buf[p][:T]]),
+                        # "cover_return": torch.stack(
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in cover_return_buf[p][:T]]),
                         "obs_z": 
                             torch.stack(obs_z_buf[p][:T]),
                         "obs_x": 
                             torch.stack(obs_x_buf[p][:T]),
                     })
                     
+                    target_wp_buf[p] = target_wp_buf[p][T:]
                     cover_action_mask_buf[p] = cover_action_mask_buf[p][T:]
-                    cover_public_score_buf[p] = cover_public_score_buf[p][T:]
-                    cover_return_buf[p] = cover_return_buf[p][T:]
-                    cover_action_buf[p] = cover_action_buf[p][T:]
+                    # cover_public_score_buf[p] = cover_public_score_buf[p][T:]
+                    # cover_return_buf[p] = cover_return_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
                     obs_x_buf[p] = obs_x_buf[p][T:]
                     size[p] -= T
@@ -229,588 +308,24 @@ def act(i, device, batch_queues, model, banker_win_counter, idler_win_countermod
             for p in ['bid']:
                 if size[p] > T:
                     batch_queues[p].put({
-                        "bid_action_mask": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_action_mask_buf[p][:T]]),
-                        "bid_return": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_return_buf[p][:T]]),
-                        "bid_score": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_score_buf[p][:T]]),
-                        "bid_suit": torch.stack(
-                            [torch.tensor(ndarr, device="cpu") for ndarr in bid_suit_buf[p][:T]]),
+                        # "bid_return": torch.stack(
+                        #     [torch.tensor(ndarr, device="cpu") for ndarr in bid_return_buf[p][:T]]),
+                        "target_wp": torch.stack(
+                            [torch.tensor(ndarr, device="cpu") for ndarr in target_wp_buf[p][:T]]),
                         "obs_z": 
                             torch.stack(obs_z_buf[p][:T]),
                         "obs_x": 
                             torch.stack(obs_x_buf[p][:T]),
                     })
-                    
-                    bid_action_mask_buf[p] = bid_action_mask_buf[p][T:]
-                    bid_return_buf[p] = bid_return_buf[p][T:]
-                    bid_score_buf[p] = bid_score_buf[p][T:]
-                    bid_suit_buf[p] = bid_suit_buf[p][T:]
+                    target_wp_buf[p] = target_wp_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
                     obs_x_buf[p] = obs_x_buf[p][T:]
                     size[p] -= T
-                     
 
     except KeyboardInterrupt:
         print('KeyboardInterrupt')
     except Exception as e:
-        print('Exception in worker process %i', i)
+        print('Exception in worker process %i', actor_index)
         traceback.print_exc()        
         raise e    
     print('act over')
-
-# def step(i, device, actor, batch_queues, buffers, flags):
-#     """
-#     This function will run forever until we stop it. It will generate
-#     data from the environment and send the data to buffer. It uses
-#     a free queue and full queue to syncup with the main process.
-#     """
-    
-#     try:
-#         T = flags.unroll_length
-#         print('(TractorsEnv)Device %s Actor %i started.', str(device), i)
-
-#         env = TractorsEnv(flags)
-#         # env = Environment(env, device)
-
-#         '''逐步迭代:
-#         1.从残局预测开始训练（可见信息最丰富），然后逐步加入更多的不可见信息。'''
-#         threshold_handcards = 5
-        
-#         '''最终的回放buff，形状[T,15,4,2,4,15]，
-#         每个buff元素是一个形状为[15,4,2,4,15]的矩阵，15是轮数(card_play_action_seq)，后面是一轮的出牌'''
-        
-#         positions = ['banker', 'idler']
-        
-#         #经验缓存
-#         hand_cards_buf = {p: [] for p in positions}
-#         major_cards_buf = {p: [] for p in positions}
-#         public_cards_buf = {p: [] for p in positions}
-#         played_score_cards_buf = {p: [] for p in positions}
-#         remain_score_cards_buf = {p: [] for p in positions}
-#         card_play_action_seq_buf = {p: [] for p in positions}
-#         round_play_cards_buf = {p: [] for p in positions}
-#         last_play_cards_buf = {p: [] for p in positions}
-#         played_cards_buf = {p: [] for p in positions}
-#         mask_cards_buf = {p: [] for p in positions}
-#         my_seat_buf = {p: [] for p in positions}
-#         play_rights_seat_buf = {p: [] for p in positions}
-#         banker_seat_buf = {p: [] for p in positions}
-#         score_buf = {p: [] for p in positions}
-#         win_score_buf = {p: [] for p in positions}
-#         num_cards_left_buf = {p: [] for p in positions}
-#         predict_action_buf = {p: [] for p in positions}
-#         reward_buf = {p: [] for p in positions}
-               
-
-#         while True:
-#             response = []
-            
-#             #新一局开始
-#             env.reset()
-            
-#             '''出牌阶段的回放经验'''
-#             #历史出牌序列信息
-#             card_play_action_seq = []
-
-#             #当前回合出牌序列信息
-#             round_play_cards = []
-            
-#             #最后一次出牌
-#             last_round_play_cards = []
-            
-#             hand_cards = []
-
-#             ######################################################################################
-#             #报主缓存
-#             bid_trajectory = []
-#             bid_score = 0
-            
-#             #出牌阶段的缓存            
-#             played_cards = []
-#             played_score_cards = []
-#             remain_score_cards = []
-
-#             #底牌缓存
-#             public_cards = None
-
-#             #当前得分
-#             round_score = 0
-#             game_score = 0
-            
-#             #当前牌权位置
-#             play_rights = 0            
-
-#             mask_cards = []
-#             ######################################################################################
-
-#             #回合出牌緩存
-#             round_cnt = 0
-#             play_counts = 0
-
-#             # round_player_remain_card_num = [0,0,0,0]
-#             record_index = False#是否开始记录轨迹
-#             inning_major = None
-#             inning_level = None
-            
-#             #主牌
-#             major_cards_mtx = None
-            
-#             infoset = [{} for _ in __PLAYER_COUNT__]
-
-            
-#             while True:
-#                 env.step(response)
-                
-#                 err = env.getError()
-#                 if len(err)>0:
-#                     print(err[len(err)-1])
-#                     env.reset()
-#                     env.step(response)
-
-#                 stage = env.getStage()
-#                 #叫分阶段
-#                 if stage == "bid":
-#                     play_pos = env.getPlayerPosition()                    
-                    
-#                     if np.random.rand() < 0.5:
-#                         response = [play_pos, 0]
-#                     else:
-#                         bid_opt = math.max(0, (80/5 - len(bid_trajectory)))
-#                         response = [play_pos, random.randint(0, bid_opt*5)]
-#                         if response[1] > 0:
-#                             major_color = random.sample(__SUITSET__, 1)
-#                             response[2] = major_color
-#                             bid_score = response[1]
-#                     bid_trajectory.append(response)
-                    
-                    
-#                     # get_card = env.getDeliver()[0]
-#                     # called = env.getCalled()
-#                     # snatched = env.getSnatched()
-#                     # level = env.getLevel()
-#                     # play_pos = env.getPlayerPosition()                    
-#                     # hold = env.getPlayerHandCards(play_pos)
-#                     # ret = env.call_Snatch(get_card, hold, called, snatched, level)
-#                     # response = [play_pos, ret]
-#                     # if len(ret) > 0:
-#                     #     bid_trajectory.append(response)
-                    
-#                 #埋牌阶段(无埋牌阶段)
-#                 elif stage == "cover":
-#                     # cover_seat = response[0]
-#                     # cover_cards = response[1]
-#                     # major_color = response[2]
-                    
-#                     banker = env.getBanker()
-#                     hold_cards = env.getPlayerHandCards(banker)
-#                     cover_seat = banker                    
-#                     cover_cards = random.sample(hold_cards, 8)
-#                     response = [cover_seat, cover_cards]
-                
-                
-#                 elif stage == 'startplay':
-#                     #self, public_cards, hold_card, own_seat, bid_history, level, major
-#                     # agent_output = actor.coverCard(publiccard, hold_cards, bid_trajectory, inning_major, inning_level)
-                    
-#                     public_cards = cards2matrix(env.getPublicCards())
-#                     banker = env.getBanker()
-                    
-#                     #桌面分
-#                     played_score_cards = cards2matrix([])
-#                     #隐藏信息分
-#                     remain_score_cards = [s + '5' for s in __SUITSET__] + [s + '0' for s in __SUITSET__] + [s + 'K' for s in __SUITSET__]
-#                     remain_score_cards = env.Pokers2Num(remain_score_cards,[i for i in range(54)])
-#                     remain_score_cards.extend([c+54 for c in remain_score_cards])
-#                     remain_score_cards = cards2matrix(remain_score_cards)
-#                     #已出牌
-#                     played_cards = [cards2matrix([]) for _ in range(__PLAYER_COUNT__)]
-                    
-#                     #叫主轨迹信息
-#                     # history_bid_card = [cards2matrix([]) for _ in range(2)]
-#                     # history_bid_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(2)]
-#                     # if len(bid_trajectory)>2:
-#                     #     KeyError('len(bid_trajectory)>2')
-#                     # for i,traj in enumerate(bid_trajectory):
-#                     #     history_bid_seat[i][traj[0]-1] = 1.0
-#                     #     history_bid_card[i] = cards2matrix(traj[1])
-                    
-#                     #回合出牌序列信息
-#                     round_play_cards = [cards2matrix([]) for _ in range(__PLAYER_COUNT__)]
-#                     round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(__PLAYER_COUNT__)]
-                    
-#                     #上回合出牌序列信息
-#                     last_round_play_cards = [cards2matrix([]) for _ in range(__PLAYER_COUNT__)]
-                    
-#                     card_play_action_seq = []
-                    
-#                     #手牌
-#                     hand_cards = [cards2matrix([env.getPlayerHandCards(i)]) for i in range(__PLAYER_COUNT__)]
-#                     #mask隐蔽牌
-#                     mask_cards = [cards2matrix([1 for _ in range(__CARDS_NUM__)]) for _ in range(__PLAYER_COUNT__)]
-#                     #去掉自己的手牌
-#                     for i in range(len(mask_cards)):
-#                         mask_cards[i][hand_cards[i] == 1] = 0
-#                     mask_cards[banker][public_cards == 1] = 0
-                    
-#                     #极牌
-#                     major_cards_mtx = cards2matrix(env.getMajorCards())
-
-#                     #牌权
-#                     play_rights = banker
-                    
-#                     round_cnt = 0
-#                     play_counts = 0
-
-#                     #场面数据
-#                     # hand_cards 			[2,4,15]                #我的手牌
-#                     # major_cards			[2,4,15]                #历史级牌
-#                     # public_cards		[2,4,15]                    #底牌，只有banker可见
-#                     # played_score_cards	[2,4,15]                #已出分数牌
-#                     # remain_score_cards	[2,4,15]                #剩余分数牌
-#                     # card_play_action_seq	[60,PLAYER_COUNT,2,4,15]#历史出牌序列
-#                     # round_play_cards	[PLAYER_COUNT,2,4,15]       #当前回合出牌序列
-#                     # last_round_play_cards		[PLAYER_COUNT,2,4,15]   #上次回合出牌序列                    
-#                     # played_cards		[PLAYER_COUNT,2,4,15]       #已出牌
-#                     # mask_cards			[PLAYER_COUNT,2,4,15]   #当前玩家未知牌mask
-#                     # my_seat				[PLAYER_COUNT]          #我的座位号
-#                     # banker_seat			[PLAYER_COUNT]          #庄家座位号
-#                     # score				[40]                        #当前捡到的分数（1个占位为5分）
-#                     # win_score_limit         [40]                        #赢的分数线
-#                     # num_cards_left    []
-#                     banker = env.getBanker()
-                    
-#                     for p in __PLAYER_COUNT__:
-#                         infoset[p]['hand_cards'] = hand_cards[p]
-#                         infoset[p]['major_cards'] = major_cards_mtx
-#                         infoset[p]['public_cards'] = public_cards
-#                         infoset[p]['played_score_cards'] = played_score_cards
-#                         infoset[p]['remain_score_cards'] = remain_score_cards
-#                         infoset[p]['card_play_action_seq'] = card_play_action_seq
-#                         infoset[p]['round_play_cards'] = round_play_cards
-#                         infoset[p]['last_round_play_cards'] = last_round_play_cards
-#                         infoset[p]['played_cards'] = played_cards[p]
-#                         infoset[p]['mask_cards'] = mask_cards[p]
-#                         infoset[p]['my_seat'] = get_one_hot_array(p+1, __PLAYER_COUNT__)
-#                         infoset[p]['play_rights_seat'] = get_one_hot_array(play_rights+1, __PLAYER_COUNT__)
-#                         infoset[p]['banker_seat'] = get_one_hot_array(banker+1, __PLAYER_COUNT__)
-#                         infoset[p]['score'] = get_one_hot_array(game_score//5, __MAX_SCORE__)
-#                         infoset[p]['win_score_limit'] = get_one_hot_array(bid_score//5, __MAX_SCORE__)
-#                         infoset[p]['num_cards_left'] = [get_one_hot_array(env.getPlayerLeftHandCards(i)+1, __HAND_CARD_NUM__) for i in __PLAYER_COUNT__]
-                    
-                    
-#                 #出牌阶段
-#                 elif stage == "play":
-#                     p = env.getPlayerPosition()
-#                     banker = env.getBanker()
-#                     hold = env.getPlayerHandCards(p)
-#                     infoset[p]['hand_cards'] = cards2matrix(hold)
-#                     infoset[p]['my_seat'] = get_one_hot_array(p+1, __PLAYER_COUNT__)
-#                     infoset[p]['played_score_cards'] = played_score_cards
-#                     infoset[p]['remain_score_cards'] = remain_score_cards
-#                     infoset[p]['card_play_action_seq'] = card_play_action_seq
-#                     infoset[p]['round_play_cards'] = round_play_cards
-#                     infoset[p]['played_cards'] = played_cards[p]
-#                     infoset[p]['mask_cards'] = mask_cards[p]
-#                     infoset[p]['play_rights_seat'] = get_one_hot_array(play_rights+1, __PLAYER_COUNT__)
-#                     infoset[p]['score'] = get_one_hot_array(game_score//5, __MAX_SCORE__)
-#                     history_curr = env.getCurrRoundPlayHistory()
-#                     infoset[p]['legal_actions'] = env.getLegalPlayCard(history_curr, hold, env.getLevel())
-#                     infoset[p]['num_cards_left'] = [get_one_hot_array(env.getPlayerLeftHandCards(i)+1, __HAND_CARD_NUM__) for i in __PLAYER_COUNT__]
-                    
-#                     obs = get_obs(infoset)
-                    
-                    
-#                     #数据合法性验证 test code
-#                     # for trj in range(len(card_play_action_seq)):
-#                     #     count = 0
-#                     #     for seat in range(4):
-#                     #         count += np.sum(card_play_action_seq[trj][seat])
-#                     #     if count%2 != 0:
-#                     #         raise ValueError(card_play_action_seq[trj][seat])
-                    
-                    
-                   
-#                     #执行游戏出牌
-#                     history_curr = env.getCurrRoundPlayHistory()
-#                     hold = env.getPlayerHandCards(play_pos)
-#                     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
-#                     response = [play_pos, playedCards[random.randint(0, len(playedCards)-1)]]
-#                     playcard_mtrx = cards2matrix(response[1])
-                    
-#                     '''存储当前进度的经验回放 回合内的动态buf'''
-#                     if record_index:
-#                         role = 'banker' if banker == p else 'idler'
-#                         hand_cards_buf[role].append(np.copy(infoset[p]['hand_cards']))
-#                         major_cards_buf[role].append(np.copy(infoset[p]['major_cards']))
-#                         public_cards_buf[role].append(np.copy(infoset[p]['public_cards']))
-#                         played_score_cards_buf[role].append(np.copy(infoset[p]['played_score_cards']))
-#                         remain_score_cards_buf[role].append(np.copy(infoset[p]['remain_score_cards']))
-#                         card_play_action_seq_buf[role].append([np.copy(actions) for actions in infoset[p]['card_play_action_seq']])
-#                         round_play_cards_buf[role].append([np.copy(actions) for actions in infoset[p]['round_play_cards']])
-#                         last_play_cards_buf[role].append(np.copy(infoset[p]['last_round_play_cards']))
-#                         played_cards_buf[role].append(np.copy(infoset[p]['played_cards']))
-#                         mask_cards_buf[role].append(np.copy(infoset[p]['mask_cards']))
-#                         my_seat_buf[role].append(np.copy(infoset[p]['my_seat']))
-#                         play_rights_seat_buf[role].append(np.copy(infoset[p]['play_rights_seat']))
-#                         banker_seat_buf[role].append(np.copy(infoset[p]['banker_seat']))
-#                         score_buf[role].append(np.copy(infoset[p]['score']))
-#                         win_score_buf[role].append(np.copy(infoset[p]['win_score_limit']))
-#                         num_cards_left_buf[role].append(np.copy(infoset[p]['num_cards_left']))
-#                         predict_action_buf[role].append(np.copy(playcard_mtrx))
-                    
-#                     '''更新回合动态buf'''
-#                     #mask隐蔽牌
-#                     for i in range(__PLAYER_COUNT__):
-#                         mask_cards[i][playcard_mtrx == 1] = 0
-                    
-#                     if play_counts == 0 :
-#                         first_play_mtx = np.copy(playcard_mtrx)
-#                         first_play_suit_mask = np.any(first_play_mtx == 1, axis=(0, 2))#找出 first_play_mtx 中值为 1 的位置位于第二维（Axis 1）的哪一行（即哪个花色）
-#                         suit_indices = np.where(first_play_suit_mask)[0]# 获取具体的花色索引 (例如: array([1]) 表示第1个花色，即红桃等，取决于具体定义) np.where 返回元组，取第一个元素 [0] 得到索引数组
-#                         play_suit_index = suit_indices[0]
-                        
-#                         played_indices = playcard_mtrx == 1
-#                         is_all_major = np.all(major_cards_mtx[played_indices] == 1) if np.any(played_indices) else True
-#                     else:
-#                         #首出的牌是主牌，看有没有跟主牌
-#                         if is_all_major:
-#                             played_indices = playcard_mtrx == 1
-#                             follow_play_is_major = np.all(major_cards_mtx[played_indices] == 1) if np.any(played_indices) else True
-#                             if not follow_play_is_major:
-#                                 mask_cards[play_pos][major_cards_mtx == 1] = 0
-                                
-#                         #首出的不是主牌，看有没有全部出花牌
-#                         else:
-#                             play_card_num = np.sum(playcard_mtrx == 1)#出牌的数量
-#                             cards_in_play_suit = playcard_mtrx[:, play_suit_index, :]#提取 playcard_mtrx 在目标花色行的数据 
-#                             play_suit_card_num = np.sum(cards_in_play_suit == 1)
-#                             is_all_in_same_suit = (play_card_num == play_suit_card_num)
-#                             if not is_all_in_same_suit:
-#                                 mask_cards[play_pos][:, play_suit_index, :] = 0
-                        
-#                     # 出牌序列
-#                     round_play_cards[play_counts] = np.copy(playcard_mtrx)
-#                     # round_play_seat[play_counts][play_pos] = 1.0
-                    
-#                     card_play_action_seq.append(np.copy(playcard_mtrx))
-                    
-#                     #分牌
-#                     play_score_card = playcard_mtrx * remain_score_cards
-#                     played_score_cards = played_score_cards + play_score_card
-#                     remain_score_cards = remain_score_cards - play_score_card
-                        
-#                     #已出牌
-#                     played_cards = played_cards + playcard_mtrx    
-#                     play_counts += 1
-                            
-                    
-#                     def checkRule():
-#                         pass
-#                         # if np.sum(playcard_mtrx[:,1:4, 13:14]) > 0:
-#                         #     raise ValueError("卡牌矩阵非法")
-                        
-#                         # if np.sum(playcard_mtrx)%2 != 0 and np.sum(playcard_mtrx) != 1:
-#                         #     playedCards = env.getLegalPlayCard(history_curr, hold, inning_level)
-#                         #     raise ValueError("出牌报错，该出牌为空")
-                        
-                        
-#                         # for seat in range(play_counts):
-#                         #     if round_play_cards[seat].sum() != playcard_mtrx.sum():
-#                         #         raise ValueError("出牌报错，该出牌与历史出牌不一致")
-
-                        
-
-                        
-
-                        
-#                         # # #test code 错误检验
-#                         # all_cards = played_score_cards + remain_score_cards
-#                         # card_num = np.sum(all_cards)
-#                         # if card_num != 24:
-#                         #     raise ValueError('分数牌不一致')
-#                         # for k in range(len(played_score_card_buf)):
-#                         #     score_cards = played_score_card_buf[k]
-#                         #     remain_score_cards = remain_score_card_buf[k]
-#                         #     all_cards = score_cards + remain_score_cards
-#                         #     card_num = np.sum(all_cards)
-#                         #     if card_num != 24:
-#                         #         raise ValueError('分数牌不一致')
-                            
-                    
-                    
-
-#                 #一回合结束
-#                 elif stage == 'roundend' or stage == 'gameend':
-#                     if len(env.getPlayerHandCards(env.getPlayerPosition())) <= threshold_handcards:
-#                         record_index = True
-                    
-#                     round_score = env.getLastRoundScore()
-#                     game_score = env.getTotalScore()
-                    
-#                     #根据回合结束后的分数给reward
-#                     if stage == 'roundend':
-#                         #获得回合胜利
-#                         banker = env.getBanker()
-#                         #这里最好看有没有分牌，有分牌就调整reward
-#                         reward = round_score/10. + 0.05
-#                         mult = 1 if banker == play_rights else -1
-#                         reward_buf['banker'].append(torch.tensor(mult*reward))
-#                         reward_buf['idler'].append(torch.tensor(-mult*reward))
-#                         reward_buf['idler'].append(torch.tensor(-mult*reward))
-#                         # if banker == play_rights:
-#                         #     reward_list = [reward, -reward, -reward]
-#                         # else:
-#                         #     reward_list = []
-#                         #     for i in __PLAYER_COUNT__:
-#                         #         reward_list.append(-reward if (play_rights+i)%__PLAYER_COUNT__ == banker else reward)
-#                         # reward_list = np.array(reward_list, dtype=np.float32)
-#                         # reward_buf.extend(reward_list)
-                        
-#                         play_rights = env.getPlayerPosition()
-#                         infoset['play_rights_seat'] = get_one_hot_array(play_rights+1, __PLAYER_COUNT__)
-#                         last_round_play_cards = [np.copy(play_cards) for play_cards in round_play_cards]
-                        
-#                         play_counts = 0
-#                         round_cnt += 1
-                        
-#                         #存储训练用的经验回放 即时奖励
-#                         '''role = 'banker' if banker == p else 'idler'
-#                         hand_cards_buf[role].append(np.copy(infoset[p]['hand_cards']))
-#                         major_cards_buf[role].append(np.copy(infoset[p]['major_cards']))
-#                         public_cards_buf[role].append(np.copy(infoset[p]['public_cards']))
-#                         played_score_cards_buf[role].append(np.copy(infoset[p]['played_score_cards']))
-#                         remain_score_cards_buf[role].append(np.copy(infoset[p]['remain_score_cards']))
-#                         card_play_action_seq_buf[role].append([np.copy(actions) for actions in infoset[p]['card_play_action_seq']])
-#                         round_play_cards_buf[role].append([np.copy(actions) for actions in infoset[p]['round_play_cards']])
-#                         last_play_cards_buf[role].append(np.copy(infoset[p]['last_round_play_cards']))
-#                         played_cards_buf[role].append(np.copy(infoset[p]['played_cards']))
-#                         mask_cards_buf[role].append(np.copy(infoset[p]['mask_cards']))
-#                         my_seat_buf[role].append(np.copy(infoset[p]['my_seat']))
-#                         play_rights_seat_buf[role].append(np.copy(infoset[p]['play_rights_seat']))
-#                         banker_seat_buf[role].append(np.copy(infoset[p]['banker_seat']))
-#                         score_buf[role].append(np.copy(infoset[p]['score']))
-#                         win_score_buf[role].append(np.copy(infoset[p]['win_score_limit']))
-#                         num_cards_left_buf[role].append(np.copy(infoset[p]['num_cards_left']))
-#                         predict_action_buf[role].append(np.copy(playcard_mtrx))'''
-#                         role ='banker'
-#                         while len(hand_cards_buf[role]) > T:
-#                             batch_queues.put({
-#                                 "hand_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in hand_cards_buf[role][:T]]),
-#                                 "major_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in major_cards_buf[role][:T]]),
-#                                 "public_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in public_cards_buf[role][:T]]),
-#                                 "played_score_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in played_score_cards_buf[role][:T]]),
-#                                 "remain_score_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in remain_score_cards_buf[role][:T]]),
-#                                 "card_play_action_seq_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in card_play_action_seq_buf[role][:T]]),
-#                                 "round_play_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in round_play_cards_buf[role][:T]]),
-#                                 "last_play_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in last_play_cards_buf[role][:T]]),
-#                                 "played_cards_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in played_cards_buf[role][:T]]),
-#                                 "my_seat_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in my_seat_buf[role][:T]]),
-#                                 "play_rights_seat_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in play_rights_seat_buf[role][:T]]),
-#                                 "banker_seat_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in banker_seat_buf[role][:T]]),
-#                                 "score_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in score_buf[role][:T]]),
-#                                 "win_score_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in win_score_buf[role][:T]]),
-#                                 "num_cards_left_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in num_cards_left_buf[role][:T]]),
-#                                 "predict_action_buf": torch.stack([torch.tensor(ndarr, device="cpu") for ndarr in predict_action_buf[role][:T]]),
-#                                 "reward_buf": torch.stack([ndarr.clone().detach() for ndarr in reward_buf[role][:T]]),
-#                             })
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-#                             hand_cards_buf[role] = hand_cards_buf[role][T:]
-                            
-                            
-#                             episode_return_buf[p] = episode_return_buf[p][T:]
-#                             target_adp_buf[p] = target_adp_buf[p][T:]
-#                             target_wp_buf[p] = target_wp_buf[p][T:]
-#                             target_wp_bid_buf[p] = target_wp_bid_buf[p][T:]
-#                             obs_x_batch_buf[p] = obs_x_batch_buf[p][T:]
-#                             obs_z_buf[p] = obs_z_buf[p][T:]
-#                             size[p] -= T
-                            
-#                             index = free_queue.get()#bug 这里容易卡死 batchszie要小于num_buffers，batchszie不够就会一直等待足够的num_buffers，num_buffers又会等待batchsize训练数据释放
-#                             if index is None:
-#                                 break
-#                             for t in range(T):
-#                                 # buffers是tensor history_play_card_buff是array
-#                                 buffers['card_play_action_seq'][index][t, ...] = torch.tensor(history_play_card_buf[t])
-#                                 buffers['history_play_seat'][index][t, ...] = torch.tensor(history_play_seat_buf[t])
-#                                 buffers['played_cards'][index][t, ...] = torch.tensor(history_played_card_buf[t])
-#                                 buffers['history_bid_card'][index][t, ...] = torch.tensor(history_bid_card_buf[t])
-#                                 buffers['history_bid_seat'][index][t, ...] = torch.tensor(history_bid_seat_buf[t])
-#                                 buffers['round_play_cards'][index][t, ...] = torch.tensor(round_play_card_buf[t])
-#                                 buffers['round_play_seat'][index][t, ...] = torch.tensor(round_play_seat_buf[t])
-#                                 buffers['score_card'][index][t, ...] = torch.tensor(played_score_card_buf[t])
-#                                 buffers['remain_score_cards'][index][t, ...] = torch.tensor(remain_score_card_buf[t])
-#                                 buffers['my_seat'][index][t, ...] = torch.tensor(my_seat_buf[t])
-#                                 buffers['banker_seat'][index][t, ...] = torch.tensor(banker_seat_buf[t])
-#                                 buffers['public_cards'][index][t, ...] = torch.tensor(public_card_buf[t])
-#                                 buffers['hand_card'][index][t, ...] = torch.tensor(hand_cards_buf[t])
-#                                 buffers['mask_card'][index][t, ...] = torch.tensor(mask_cards_buf[t])#'''特征工程 规则层特征'''    
-                                
-                            
-#                             full_queue.put(index)
-#                             history_play_card_buf = history_play_card_buf[T:]
-#                             history_play_seat_buf = history_play_seat_buf[T:]
-#                             history_played_card_buf = history_played_card_buf[T:]
-#                             history_bid_card_buf = history_bid_card_buf[T:]
-#                             history_bid_seat_buf = history_bid_seat_buf[T:]
-#                             round_play_card_buf = round_play_card_buf[T:]
-#                             round_play_seat_buf = round_play_seat_buf[T:]
-#                             played_score_card_buf = played_score_card_buf[T:]
-#                             remain_score_card_buf = remain_score_card_buf[T:]
-#                             my_seat_buf = my_seat_buf[T:]
-#                             banker_seat_buf = banker_seat_buf[T:]
-#                             public_card_buf = public_card_buf[T:]
-#                             hand_cards_buf = hand_cards_buf[T:]
-#                             mask_cards_buf = mask_cards_buf[T:]
-                    
-#                     # #数据合法性验证 test code
-#                     # for trj in range(len(card_play_action_seq)):
-#                     #     count = 0
-#                     #     for seat in range(4):
-#                     #         count += np.sum(card_play_action_seq[trj][seat])
-#                     #     if count%2 != 0:
-#                     #         raise ValueError(card_play_action_seq[trj][seat])
-                    
-                        
-
-#                     #重置回合信息
-#                     round_play_cards = [cards2matrix([]) for _ in range(__PLAYER_COUNT__)]
-#                     round_play_seat = [np.zeros(__PLAYER_COUNT__) for _ in range(__PLAYER_COUNT__)]                    
-                    
-                        
-#                     response = None
-                    
-                    
-                    
-#                 elif stage == "finalend":
-#                     break
-            
-            
-            
-
-#     except KeyboardInterrupt:
-#         pass  
-#     except Exception as e:
-#         log.error('Exception in worker process %i', i)
-#         traceback.print_exc()
-#         print()
-#         raise e
-    
-

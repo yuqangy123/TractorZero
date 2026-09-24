@@ -3,14 +3,93 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Categorical
 import numpy as np
-import scipy.signal
-import gym
 import os
 import datetime
-from .BasicBlockM import ResNet, ResidualBlock
+from .BasicBlockM import ResNet, ResidualBlock, ResidualLinearBlock
 # from .common_model import PlayerEncoder
+
+# 上层决策：7 个可学习的离散策略（option），由整局回报优化。
+NUM_STRATEGY = 7
+
+# 事后动作诊断标签；索引不约束回报学习后的 option 语义。
+_STRATEGY_NAMES = ['强势进攻', '稳健控分', '同伴助攻', '破坏防守', '垫牌过渡', '保底策略', '甩牌试探']
+
+# 庄家方阵营；闲家方为其余两个角色
+_BANKER_TEAM = {'banker', 'banker_op'}
+
+
+def compute_strategy_targets(step_meta, position):
+    """由「本墩实际动作特征」计算 7 维 one-hot 诊断标签（互斥单标签）。
+
+    这些标签使用出牌后的结果，只用于监控；不是上层 Q(s, g) 的回归目标。
+
+    step_meta: Env._get_step_meta() 在环境 reset 之前冻结的本墩快照
+        roles[role] = {is_lead, threw, followed, won, score_in_play}
+        winner_role / round_score / score_played / is_last_round
+
+    优先级自上而下，命中一条即返回，天然 one-hot、不会出现并列：
+        5 保底策略   终局墩且我方（自己或队友）夺得本墩牌权
+        6 甩牌试探   首出且实际甩牌（牌型判定为 SUSPECT）
+        4 垫牌过渡   非首出且自己未赢墩，包含跟门和未跟门的牌
+        2 同伴助攻   队友夺得本墩牌权且本墩打出过分牌
+        1 稳健控分   自己夺得牌权且本墩打出过分牌
+        0 强势进攻   自己夺得牌权
+        3 破坏防守   其余（对手夺得牌权）兜底
+    """
+    one_hot = np.zeros(NUM_STRATEGY, dtype=np.float32)
+    step_meta = step_meta or {}
+    feat = step_meta.get('roles', {}).get(position)
+    if feat is None:  # 缺少本墩信息时退化为强势进攻
+        one_hot[0] = 1.0
+        return one_hot
+
+    winner_role = step_meta.get('winner_role')
+    if winner_role is None:
+        mate_won = False
+    else:
+        same_team = (winner_role in _BANKER_TEAM) == (position in _BANKER_TEAM)
+        mate_won = same_team and winner_role != position
+
+    is_last = float(step_meta.get('is_last_round', 0.0)) >= 0.5
+    score_played = float(step_meta.get('score_played', 0.0)) >= 0.5
+    is_lead = feat['is_lead'] >= 0.5
+    won = feat['won'] >= 0.5
+    
+    idx = 3
+    if is_lead:
+        if won:
+            if is_last:
+                idx = 5#5 保底策略   终局墩且我方（自己或队友）夺得本墩牌权
+            if score_played:
+                idx = 1#1 稳健控分   自己夺得牌权且本墩打出过分牌
+            else:
+                idx = 0#0 强势进攻   自己夺得牌权
+        elif feat['threw'] >= 0.5:
+            idx = 6#6 甩牌试探   首出且实际甩牌（牌型判定为 SUSPECT）
+        elif not score_played:
+            idx = 4#4 垫牌过渡   自己未赢墩，包含跟门和未跟门的牌
+    else:
+        if won:
+            if is_last:
+                idx = 5#5 保底策略   终局墩且我方（自己或队友）夺得本墩牌权
+            elif score_played:
+                idx = 1#1 稳健控分   自己夺得牌权且本墩打出过分牌
+            else:
+                idx = 0#0 强势进攻   自己夺得牌权
+        elif mate_won:
+            if is_last:
+                idx = 5#5 保底策略   终局墩且我方（自己或队友）夺得本墩牌权
+            elif score_played:
+                idx =2#2 同伴助攻   队友夺得本墩牌权且本墩打出过分牌
+            elif not score_played:
+                idx = 4#4 垫牌过渡   自己未赢墩，包含跟门和未跟门的牌
+        else:
+            if not score_played:
+                idx = 4#4 垫牌过渡   非首出且自己未赢墩，包含跟门和未跟门的牌
+
+    one_hot[idx] = 1.0
+    return one_hot
 
 # Add Transformer components
 class PositionalEncoding(nn.Module):
@@ -63,8 +142,6 @@ class TransformerEncoder(nn.Module):
             output = mod(output)
         return output
 
-'''出牌模型'''
-
 class Actor(nn.Module):
     """
     通过状态编码器编码场面信息。
@@ -89,7 +166,6 @@ class Actor(nn.Module):
             return self.actor(obs_x)
         return self.actor(t.cat([obs_x, goal], 1))
     
-
 # Rest of the classes remain unchanged...
 class Critic(nn.Module):
     """
@@ -237,48 +313,42 @@ class BankerModel(nn.Module):
         super().__init__()
         self._device = device
         self.num_action_type = num_action_type
-        self.cards_shape = (2, 4, 15)
-        hidden_dim = 512
+        hidden_dim = 4096
 
         # 手牌特征提取器 (2,4,15) -> (hidden_channels,2,4,5) 
         ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
-        self.cards_encoder = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], \
-                                        in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
+        self.cards_encoder_tp = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[58,58,116,116], \
+                                        in_channels=58,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
 
-        
+        self.cards_encoder_action = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[60,60,120,120], \
+                                        in_channels=60,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         #历史出牌时序特征, 接着 cards_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
         # self.lstm = nn.LSTM(hidden_dim+4, hidden_dim, batch_first=True)
         # self.attention_play = AttentionLayer( hidden_dim+4)
         # self.attention_bid = AttentionLayer( hidden_dim+4)
         # self.attention_round = AttentionLayer( hidden_dim+4)
 
-        #上层策略网络
+        #上层策略网络：状态级输入(不含牌型候选)，z(297) + x_feat(4096)
         self.strategy_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, 7, bias=False),
-            nn.Sigmoid()
+            ResidualLinearBlock(4393, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, NUM_STRATEGY, bias=False),
         )
-        #下层出牌牌型网络
-        self.action_type_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, num_action_type, bias=False),
+
+        #下层牌型网络
+        self.type_q_net = nn.Sequential(
+            ResidualLinearBlock(5005 + NUM_STRATEGY*3, 2048),
+            ResidualLinearBlock(2048, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, 3, bias=False),
         )
-        #下层出牌Q值网络
+        #下层出牌网络
         self.action_q_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, 3, bias=False),
-            nn.Sigmoid()
+            ResidualLinearBlock(5005 + NUM_STRATEGY*3, 2048),
+            ResidualLinearBlock(2048, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, 3, bias=False),
         )
-        
         
         # #牌型决策层模型， 输出4种牌型概率
         # self.actionTypeModel = PPOClip(3620, 0, self.action_type_num, device=device)
@@ -287,75 +357,58 @@ class BankerModel(nn.Module):
         # #垫牌模层模型，输出需要垫的牌矩阵
         # self.actionDiscardModel = PPOClip(3620, self.action_type_num+2*4*15, 2*4*15, device=device)
 
-    def __is_tractor_batch(self, cnt):
-        # cnt: [B,4,15]
-        B = cnt.size(0)
-
-        # 1. 用到的花色数量
-        suit_used = (cnt.sum(dim=2) > 0).int()     # [B,4]
-        suit_count = suit_used.sum(dim=1)          # [B]
-
-        cond_one_suit = (suit_count == 1)
-
-        # 2. 找出那个花色
-        suit_idx = suit_used.argmax(dim=1)         # [B]
-
-        # 3. 取该花色的 rank 计数
-        batch_idx = t.arange(B, device=cnt.device)
-        rank_cnt = cnt[batch_idx, suit_idx]        # [B,15]
-
-        # 4. 必须全是 2（不能有 1）
-        cond_all_pairs = ((rank_cnt == 2) | (rank_cnt == 0)).all(dim=1)
-
-        # 5. 至少两个对子
-        pair_mask = (rank_cnt == 2)
-        pair_num = pair_mask.sum(dim=1)
-        cond_min_len = (pair_num >= 2)
-
-        # 6. 连续性判断
-        # 取出 rank 下标
-        is_continuous = []
-        for b in range(B):
-            ranks = t.where(pair_mask[b])[0]
-            if len(ranks) >= 2 and t.all(ranks[1:] - ranks[:-1] == 1):
-                is_continuous.append(True)
-            else:
-                is_continuous.append(False)
-
-        cond_continuous = t.tensor(is_continuous, device=cnt.device)
-
-        return cond_one_suit & cond_all_pairs & cond_min_len & cond_continuous
-
-    def forward_tp(self, z, x, mask, return_value=False, flags=None):
-        x_feat = self.cards_encoder(x)
-        #连接x与z，送入action_type_net
-        x_feat = x_feat.flatten(1, 2)
-        z_expanded = z.unsqueeze(0).expand(self.num_action_type, -1, -1)
-        t_feat = [z_expanded[i] for i in range(self.num_action_type)] + [x_feat]
-        output = t.cat(t_feat, dim=-1)        
-        logits = self.action_type_net(output)
-    
-        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
-            action = t.multinomial(mask, num_samples=1).squeeze(1)
-        else:
-            out = logits * mask
-            action = t.argmax(out, dim=0)[0]
-            
+    def forward_strategy(self, z, x, return_value=False, flags=None):
+        """输出 Q(s, g)；单状态推理按 epsilon-greedy 选择上层策略。"""
+        x_feat = self.cards_encoder_tp(x)
+        output = t.cat([z, x_feat], -1)
+        values = self.strategy_net(output)  # [B, NUM_STRATEGY]
+        
         if return_value:
-            return dict(action=action, values=out)
-        else:
-            return dict(action=action)
+            return dict(values=values)
 
-    def forward_act(self, z, x, return_value=False, flags=None):
-        x_feat = self.cards_encoder(x)
-        output = t.cat([z, z, z, z, x_feat], dim=-1)
-        output = t.cat([z, z, z, z, x_feat], dim=-1)
+        if values.shape[0] != 1:
+            raise ValueError('Strategy selection requires exactly one state')
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            strategy = t.randint(NUM_STRATEGY, (), device=values.device)
+        else:
+            strategy = values[0].argmax(dim=-1)
+        return dict(action=strategy, values=values)
+
+    
+    def forward_tp(self, z, x, strategy, return_value=False, flags=None):
+        x_feat = self.cards_encoder_tp(x)
+        output = t.cat([z, z, z, strategy, strategy, strategy, x_feat], -1)
         
-        logits = self.action_q_net(output)
-        
+        logits = self.type_q_net(output)
         win_rate, win, lose = t.split(logits, (1, 1, 1), dim=-1)
-        win_rate = t.tanh(win_rate)
-        _win_rate = (win_rate + 1) / 2
+        # win/lose 同样 tanh 有界化到 [-1,1]：无界线性输出与 target_adp 的 MSE 会因单批极端输出产生巨大 loss 尖峰
+        # win_rate = t.tanh(win_rate)
+        # win = t.tanh(win)
+        # lose = t.tanh(lose)
+        _win_rate = t.sigmoid(win_rate)  # 训练回归 1{wp>0}（BCEWithLogits），输出是胜率 logit，sigmoid 才是概率
+        out = _win_rate * win + (1. - _win_rate) * lose
+        
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            action = t.randint(out.shape[0], (1,))[0]
+        else:
+            action = t.argmax(out, dim=0)[0]
+                
+        if return_value:
+            return dict(action=action, max_value=t.max(out), values=(win_rate, win, lose))
+        else:
+            return dict(action=action, max_value=t.max(out))
+
+    def forward_act(self, z, x, strategy, return_value=False, flags=None):
+        x_feat = self.cards_encoder_action(x)
+        output = t.cat([z, z, z, strategy, strategy, strategy, x_feat], -1)
+
+        logits = self.action_q_net(output)
+        win_rate, win, lose = t.split(logits, (1, 1, 1), dim=-1)
+        # win/lose 同样 tanh 有界化到 [-1,1]：无界线性输出与 target_adp 的 MSE 会因单批极端输出产生巨大 loss 尖峰
+        # win_rate = t.tanh(win_rate)
+        # win = t.tanh(win)
+        # lose = t.tanh(lose)
+        _win_rate = t.sigmoid(win_rate)  # 训练回归 1{wp>0}（BCEWithLogits），输出是胜率 logit，sigmoid 才是概率
         out = _win_rate * win + (1. - _win_rate) * lose
 
         if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
@@ -369,200 +422,13 @@ class BankerModel(nn.Module):
             return dict(action=action, max_value=t.max(out))
         
     
-    def forward(self, obs, play_action_seq, legal_actions):
-        cards_feat = self.cards_encoder(obs)
-        
-        play_seq_feat = self.cards_encoder(play_action_seq)
-        h_play, (_, _) = self.lstm(play_seq_feat)
-        # 使用注意力机制替代直接取最后一个时间步
-        h_play_att = self.attention_play(play_seq_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
-        h_play += h_play_att
-        
-        pub_x = t.cat([cards_feat, h_play], dim=0)
-        
-        strategy_logits = self.strategy_net(pub_x)
-        best_s = t.argmax(strategy_logits, dim=1)
-        strategy_feat = t.zeros((7,), device=self._device, dtype=t.float32)
-        strategy_feat[best_s] = 1.
-        
-        input_ty = t.cat([pub_x, strategy_feat], dim=0)
-        action_type_logits = self.action_type_net(input_ty)
-        best_t = t.argmax(action_type_logits, dim=1)
-        
-        actions_batch = t.tensor(legal_actions[best_t], dtype=t.float32, device=self._device)
-        pub_x_batch = np.repeat( pub_x[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
-        strategy_feat_batch = np.repeat( strategy_feat[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
-        z_batch = np.concatenate((actions_batch, pub_x_batch, strategy_feat_batch), axis=1)
-        act_logits = self.action_q_net(z_batch)
-        
-        return dict(value=act_logits, strategy=best_s)
-    def forward1(self, state_feat, isTrain = None):
-        B = state_feat['history_play_seat'].shape[0]#批次
-        play_card_history_feat = state_feat['history_play_card']#历史出牌
-        play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
-        played_card_history_feat=state_feat['history_played_card']#已出过的牌
-        bid_card_history_feat = state_feat['history_bid_card']#報主記錄
-        bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
-        
-        play_card_round_feat = state_feat['round_play_card']#当前回合牌
-        play_seat_round_feat = state_feat['round_play_seat']#当前回合牌
-
-        score_card_feat = state_feat['score_card']#分數牌
-        score_remain_card_feat = state_feat['remain_score_card']#分數牌
-        my_seat_feat = state_feat['my_seat']#我的座位号
-        banker_seat_feat = state_feat['banker_seat']#我的座位号
-        mask_cards = state_feat['mask_card']#.copy()#mask牌
-        hand_card_feat = state_feat['hand_card']#.copy()
-        public_card_feat = state_feat['public_card']
-        legal_actions = state_feat['legal_actions']#合法动作，【单牌，对子，甩牌，拖拉机】4维特征，对应
-        action_types = np.array(list(legal_actions.keys()))
-        action_cards = list(legal_actions.values())#合法
-        
-        # #是否首出
-        # player0_cards = play_card_round_feat[:,0]#[B,4,2,4,15] -> [B,2,4,15]
-        # cnt = player0_cards.sum(dim=1)   # [B,4,15] cnt[b, s, r] ∈ {0,1,2} 第 b 个 batch 中，玩家 0 在 (suit=s, rank=r) 上有几张
-        # total_cards = cnt.sum(dim=(1,2))   # [B] 总牌数
-        # is_first_play = (total_cards == 0)#首出
-        # is_single = (total_cards == 1)
-        # is_pair = (total_cards == 2) & (cnt.max(dim=2).values.max(dim=1).values == 2)
-        # tractor_mask = self.__is_tractor_batch(cnt)
-        # round_play_card_type = t.full((B,), fill_value=-1, device=cnt.device)
-        # round_play_card_type[is_single] = 0#单张
-        # round_play_card_type[is_pair] = 1#对子
-        # round_play_card_type[tractor_mask] = 2#拖拉机
-        # round_play_card_type[round_play_card_type == -1] = 3# 剩下的全部是甩牌
-
-
-
-        
-        ################################################################################
-
-        # #底牌，只有庄家知道
-        # public_card_feat = state_feat['public_card']
-        # seat_equal_mask = (my_seat_feat == banker_seat_feat).sum(1) == 4
-        # expanded_mask = seat_equal_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Shape: [B, 1, 1, 1]
-        # expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
-        # public_card_feat = public_card_feat * expanded_mask.float()# Zero out public_card_feat where mask is False
-
-
-
-        #多次动作组成的一轮数据，将多次打平成第三维 
-        b, a, c, d, e, f = play_card_history_feat.shape
-        play_card_history_feat = play_card_history_feat.reshape(b, a*c, d, e, f)
-        b, a, c, d = play_seat_history_feat.shape
-        play_seat_history_feat = play_seat_history_feat.reshape(b, a*c, d)
-        b, a, c, d, e = bid_card_history_feat.shape
-
-        bid_card_history_feat = bid_card_history_feat.reshape(b, a, c, d, e)
-        b, a, c = bid_seat_history_feat.shape
-        bid_seat_history_feat = bid_seat_history_feat.reshape(b, a, c)
-        b, a, c, d, e = play_card_round_feat.shape
-        play_card_round_feat = play_card_round_feat.reshape(b, a, c, d, e)
-        b, a, c = play_seat_round_feat.shape
-        play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
-        
-        card_feature_dict = {
-            'play_history': play_card_history_feat.reshape(-1, 2, 4, 15),
-            'bid_history': bid_card_history_feat.reshape(-1, 2, 4, 15),
-            'round_history': play_card_round_feat.reshape(-1, 2, 4, 15),
-            'played_history': played_card_history_feat,
-            'score_remain': score_remain_card_feat,
-            # 'public_card': public_card_feat,
-            'mask_card': mask_cards,
-        }
-
-        
-        # Concatenate all features along batch dimension
-        batched_features = t.cat(list(card_feature_dict.values()), dim=0)
-
-        # Single encoder call
-        encoded_features = self.card_encoder(batched_features)
-
-        # Split and reshape back
-        split_sizes = [v.shape[0] for v in card_feature_dict.values()]
-        split_features = t.split(encoded_features, split_sizes, dim=0)
-
-        # Reconstruct individual features
-        features_iter = iter(split_features)
-        play_card_history_enocdefeat = next(features_iter).reshape( play_card_history_feat.shape[0], play_card_history_feat.shape[1], -1)
-        bid_card_history_encodefeat = next(features_iter).reshape( bid_card_history_feat.shape[0], bid_card_history_feat.shape[1], -1)
-        round_card_history_encodefeat = next(features_iter).reshape( play_card_round_feat.shape[0], play_card_round_feat.shape[1], -1)
-        played_card_history_encodefeat = next(features_iter)
-        # score_card_encodefeat = next(features_iter)
-        score_remain_card_encodefeat = next(features_iter)
-        # public_card_encodefeat = next(features_iter)
-        mask_card_encodefeat = next(features_iter)
-
-        '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
-        再将原来4个人的座位号展平，再将两个特征拼接在一起，
-        也可以使用交替凭借，
-        不过，需要注意的是，在实际应用场景中，交替拼接可能不如传统的特征拼接有效，因为：
-        语义分离：交替拼接可能会破坏特征原有的语义结构
-        网络学习难度增加：神经网络可能更难从交错特征中学习模式
-        维度不匹配问题：如果两个张量的最后一维大小不同，交错拼接会更加复杂
-        这种拼接方式让LSTM能够：
-        独立学习卡牌出牌和座位位置的时间依赖关系
-        必要时分别关注卡牌特征和座位特征
-        清晰区分不同类型的特征'''
-        # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
-        play_history_feat = t.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
-        h_play, (_, _) = self.lstm(play_history_feat)
-        # 使用注意力机制替代直接取最后一个时间步
-        h_play_att = self.attention_play(play_history_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
-        h_play += h_play_att
-
-        # bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
-        bid_history_feat = t.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
-        h_bid, (_, _) = self.lstm(bid_history_feat)
-        # 使用注意力机制
-        h_bid_att = self.attention_bid(bid_history_feat) # [B, hidden_dim*2]
-        h_bid += h_bid_att
-
-        # round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
-        round_history_feat = t.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
-        h_round, (_, _) = self.lstm(round_history_feat)
-        # 使用注意力机制
-        h_round_att = self.attention_round(round_history_feat) # [B, hidden_dim*2]
-        h_round += h_round_att
-
-        #挨个对扑克二维特征进行提取
-        # played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
-        # score_card_encodefeat = self.card_encoder(score_card_feat)
-        # score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
-        # public_card_encodefeat = self.card_encoder(public_card_feat)        
-        # mask_card_encodefeat = self.card_encoder(mask_card)
-
-        #特征融合
-        h_play = h_play.reshape(B, -1)
-        h_bid = h_bid.reshape(B, -1)
-        h_round = h_round.reshape(B, -1)
-        in_feat = t.cat([h_play, h_bid, h_round, 
-                             played_card_history_encodefeat, score_remain_card_encodefeat, 
-                             mask_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
-        
-        actionType = self.actionTypeModel.select_action(in_feat)
-
-        # #这两个加起来也就12ms左右
-        # opp_logits = t.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
-        # opp_logits.transpose_(1,0)
-
-        # #对超过手牌数的回归值上线进行截断
-        # # if isTrain:
-        # #     player_hand_card_num = player_hand_card_num.unsqueeze(-1).expand(-1, -1, opp_logits.shape[-1])
-        # #     opp_logits.clamp_(max=player_hand_card_num)
-            
-
-        # bottom_logits = self.bottom_head(in_feat)
-        # bottom_logits.squeeze_(1)
-        
-        # return opp_logits, bottom_logits
-
-
     def toDevice(self, device):
         self._device = device
         self.to(device)
-        self.card_encoder.toDevice(device)
-        self.action_type_net.to(device)
+        self.cards_encoder_tp.to(device)
+        self.cards_encoder_action.to(device)
+        self.strategy_net.to(device)
+        self.type_q_net.to(device)
         self.action_q_net.to(device)
 
     #计算模型大小
@@ -573,54 +439,48 @@ class BankerModel(nn.Module):
     # def load_checkpoint(self):
     #     pass
     
-    
 class IdlerModel(nn.Module):
     def __init__(self, num_action_type, device):
         super().__init__()
         self._device = device
         self.num_action_type = num_action_type
-        self.cards_shape = (2, 4, 15)
-        hidden_dim = 512
+        hidden_dim = 4096
+        #hidden_dim = 4096 hidden_channels=[58,116,232,464], ResidualLinearBlock(5005, 2048),
 
         # 手牌特征提取器 (2,4,15) -> (hidden_channels,2,4,5) 
         ##kernelsize=3, padding=1, stride=1以保存卷积后的尺寸不变化
-        self.cards_encoder = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], \
-                                        in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
+        self.cards_encoder_tp = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[58,58,116,116], \
+                                        in_channels=58,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
 
-        
+        self.cards_encoder_action = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[60,60,120,120], \
+                                        in_channels=60,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         #历史出牌时序特征, 接着 cards_encoder 输出的out_channels*4*15维出牌特征 + 4维座位号特征
         # self.lstm = nn.LSTM(hidden_dim+4, hidden_dim, batch_first=True)
         # self.attention_play = AttentionLayer( hidden_dim+4)
         # self.attention_bid = AttentionLayer( hidden_dim+4)
         # self.attention_round = AttentionLayer( hidden_dim+4)
 
-        #上层策略网络
+        #上层策略网络：状态级输入(不含牌型候选)，z(297) + x_feat(4096)
         self.strategy_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, 7, bias=False),
-            nn.Sigmoid()
+            ResidualLinearBlock(4393, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, NUM_STRATEGY, bias=False),
         )
-        #下层出牌牌型网络
-        self.action_type_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, num_action_type, bias=False),
+
+        #下层牌型网络
+        self.type_q_net = nn.Sequential(
+            ResidualLinearBlock(5005 + NUM_STRATEGY*3, 2048),
+            ResidualLinearBlock(2048, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, 3, bias=False),
         )
-        #下层出牌Q值网络
+        #下层出牌网络
         self.action_q_net = nn.Sequential(
-            nn.Linear(512, 512, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(512, 256, bias=False),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(256, 3, bias=False),
-            nn.Sigmoid()
+            ResidualLinearBlock(5005 + NUM_STRATEGY*3, 2048),
+            ResidualLinearBlock(2048, 512),
+            ResidualLinearBlock(512, 128),
+            nn.Linear(128, 3, bias=False),
         )
-        
         
         # #牌型决策层模型， 输出4种牌型概率
         # self.actionTypeModel = PPOClip(3620, 0, self.action_type_num, device=device)
@@ -629,281 +489,78 @@ class IdlerModel(nn.Module):
         # #垫牌模层模型，输出需要垫的牌矩阵
         # self.actionDiscardModel = PPOClip(3620, self.action_type_num+2*4*15, 2*4*15, device=device)
 
-    def __is_tractor_batch(self, cnt):
-        # cnt: [B,4,15]
-        B = cnt.size(0)
+    def forward_strategy(self, z, x, return_value=False, flags=None):
+        """输出 Q(s, g)；单状态推理按 epsilon-greedy 选择上层策略。"""
+        x_feat = self.cards_encoder_tp(x)
+        output = t.cat([z, x_feat], -1)
+        values = self.strategy_net(output)  # [B, NUM_STRATEGY]，不是分类 logits
 
-        # 1. 用到的花色数量
-        suit_used = (cnt.sum(dim=2) > 0).int()     # [B,4]
-        suit_count = suit_used.sum(dim=1)          # [B]
-
-        cond_one_suit = (suit_count == 1)
-
-        # 2. 找出那个花色
-        suit_idx = suit_used.argmax(dim=1)         # [B]
-
-        # 3. 取该花色的 rank 计数
-        batch_idx = t.arange(B, device=cnt.device)
-        rank_cnt = cnt[batch_idx, suit_idx]        # [B,15]
-
-        # 4. 必须全是 2（不能有 1）
-        cond_all_pairs = ((rank_cnt == 2) | (rank_cnt == 0)).all(dim=1)
-
-        # 5. 至少两个对子
-        pair_mask = (rank_cnt == 2)
-        pair_num = pair_mask.sum(dim=1)
-        cond_min_len = (pair_num >= 2)
-
-        # 6. 连续性判断
-        # 取出 rank 下标
-        is_continuous = []
-        for b in range(B):
-            ranks = t.where(pair_mask[b])[0]
-            if len(ranks) >= 2 and t.all(ranks[1:] - ranks[:-1] == 1):
-                is_continuous.append(True)
-            else:
-                is_continuous.append(False)
-
-        cond_continuous = t.tensor(is_continuous, device=cnt.device)
-
-        return cond_one_suit & cond_all_pairs & cond_min_len & cond_continuous
-
-    def forward_tp(self, z, x, mask, return_value=False, flags=None):
-        x_feat = self.cards_encoder(x)
-        #连接x与z，送入action_type_net
-        x_feat = x_feat.flatten(1, 2)
-        z_expanded = z.unsqueeze(0).expand(self.num_action_type, -1, -1)
-        t_feat = [z_expanded[i] for i in range(self.num_action_type)] + [x_feat]
-        output = t.cat(t_feat, dim=-1)
-        
-        logits = self.action_type_net(output)
-        out = logits * mask
-        
         if return_value:
-            return dict(values=out)
+            return dict(values=values)
+
+        if values.shape[0] != 1:
+            raise ValueError('Strategy selection requires exactly one state')
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            strategy = t.randint(NUM_STRATEGY, (), device=values.device)
         else:
-            if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
-                action = t.randint(out.shape[0], (1,))[0]
-            else:
-                action = t.argmax(out, dim=0)[0]
-            return dict(action=action, max_value=t.max(out), values=out)
+            strategy = values[0].argmax(dim=-1)
+        return dict(action=strategy, values=values)
+
+
+    def forward_tp(self, z, x, strategy, return_value=False, flags=None):
+        x_feat = self.cards_encoder_tp(x)
+        output = t.cat([z, z, z, strategy, strategy, strategy, x_feat], -1)
         
-    
-    def forward_act(self, z, x, return_value=False, flags=None):
-        x_feat = self.cards_encoder(x)
-        output = t.cat([z, z, z, z, x_feat], dim=-1)
-        
-        logits = self.action_q_net(output)
-        
+        logits = self.type_q_net(output)
         win_rate, win, lose = t.split(logits, (1, 1, 1), dim=-1)
-        win_rate = t.tanh(win_rate)
-        _win_rate = (win_rate + 1) / 2
+        # win/lose 同样 tanh 有界化到 [-1,1]：无界线性输出与 target_adp 的 MSE 会因单批极端输出产生巨大 loss 尖峰
+        # win_rate = t.tanh(win_rate)
+        # win = t.tanh(win)
+        # lose = t.tanh(lose)
+        _win_rate = t.sigmoid(win_rate)  # 训练回归 1{wp>0}（BCEWithLogits），输出是胜率 logit，sigmoid 才是概率
+        out = _win_rate * win + (1. - _win_rate) * lose
+        
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            action = t.randint(out.shape[0], (1,))[0]
+        else:
+            action = t.argmax(out, dim=0)[0]
+                
+        if return_value:
+            return dict(action=action, max_value=t.max(out), values=(win_rate, win, lose))
+        else:
+            return dict(action=action, max_value=t.max(out))
+
+    def forward_act(self, z, x, strategy, return_value=False, flags=None):
+        x_feat = self.cards_encoder_action(x)
+        output = t.cat([z, z, z, strategy, strategy, strategy, x_feat], -1)
+        
+        logits = self.action_q_net(output)        
+        win_rate, win, lose = t.split(logits, (1, 1, 1), dim=-1)
+        # win/lose 同样 tanh 有界化到 [-1,1]：无界线性输出与 target_adp 的 MSE 会因单批极端输出产生巨大 loss 尖峰
+        # win_rate = t.tanh(win_rate)
+        # win = t.tanh(win)
+        # lose = t.tanh(lose)
+        _win_rate = t.sigmoid(win_rate)  # 训练回归 1{wp>0}（BCEWithLogits），输出是胜率 logit，sigmoid 才是概率
         out = _win_rate * win + (1. - _win_rate) * lose
 
-        if return_value:
-            return dict(values=(win_rate, win, lose))
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            action = t.randint(out.shape[0], (1,))[0]
         else:
-            if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
-                action = t.randint(out.shape[0], (1,))[0]
-            else:
-                action = t.argmax(out, dim=0)[0]
-            return dict(action=action, max_value=t.max(out), values=out)
+            action = t.argmax(out, dim=0)[0]
+                
+        if return_value:
+            return dict(action=action, max_value=t.max(out), values=(win_rate, win, lose))
+        else:
+            return dict(action=action, max_value=t.max(out))
         
     
-    def forward(self, obs, play_action_seq, legal_actions):
-        cards_feat = self.cards_encoder(obs)
-        
-        play_seq_feat = self.cards_encoder(play_action_seq)
-        h_play, (_, _) = self.lstm(play_seq_feat)
-        # 使用注意力机制替代直接取最后一个时间步
-        h_play_att = self.attention_play(play_seq_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
-        h_play += h_play_att
-        
-        pub_x = t.cat([cards_feat, h_play], dim=0)
-        
-        strategy_logits = self.strategy_net(pub_x)
-        best_s = t.argmax(strategy_logits, dim=1)
-        strategy_feat = t.zeros((7,), device=self._device, dtype=t.float32)
-        strategy_feat[best_s] = 1.
-        
-        input_ty = t.cat([pub_x, strategy_feat], dim=0)
-        action_type_logits = self.action_type_net(input_ty)
-        best_t = t.argmax(action_type_logits, dim=1)
-        
-        actions_batch = t.tensor(legal_actions[best_t], dtype=t.float32, device=self._device)
-        pub_x_batch = np.repeat( pub_x[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
-        strategy_feat_batch = np.repeat( strategy_feat[np.newaxis, :, :], actions_batch.shape[0], axis=0 )
-        z_batch = np.concatenate((actions_batch, pub_x_batch, strategy_feat_batch), axis=1)
-        act_logits = self.action_q_net(z_batch)
-        
-        return dict(value=act_logits, strategy=best_s)
-    def forward1(self, state_feat, isTrain = None):
-        B = state_feat['history_play_seat'].shape[0]#批次
-        play_card_history_feat = state_feat['history_play_card']#历史出牌
-        play_seat_history_feat = state_feat['history_play_seat']#历史出牌座位号
-        played_card_history_feat=state_feat['history_played_card']#已出过的牌
-        bid_card_history_feat = state_feat['history_bid_card']#報主記錄
-        bid_seat_history_feat = state_feat['history_bid_seat']#報主座位号
-        
-        play_card_round_feat = state_feat['round_play_card']#当前回合牌
-        play_seat_round_feat = state_feat['round_play_seat']#当前回合牌
-
-        score_card_feat = state_feat['score_card']#分數牌
-        score_remain_card_feat = state_feat['remain_score_card']#分數牌
-        my_seat_feat = state_feat['my_seat']#我的座位号
-        banker_seat_feat = state_feat['banker_seat']#我的座位号
-        mask_cards = state_feat['mask_card']#.copy()#mask牌
-        hand_card_feat = state_feat['hand_card']#.copy()
-        public_card_feat = state_feat['public_card']
-        legal_actions = state_feat['legal_actions']#合法动作，【单牌，对子，甩牌，拖拉机】4维特征，对应
-        action_types = np.array(list(legal_actions.keys()))
-        action_cards = list(legal_actions.values())#合法
-        
-        # #是否首出
-        # player0_cards = play_card_round_feat[:,0]#[B,4,2,4,15] -> [B,2,4,15]
-        # cnt = player0_cards.sum(dim=1)   # [B,4,15] cnt[b, s, r] ∈ {0,1,2} 第 b 个 batch 中，玩家 0 在 (suit=s, rank=r) 上有几张
-        # total_cards = cnt.sum(dim=(1,2))   # [B] 总牌数
-        # is_first_play = (total_cards == 0)#首出
-        # is_single = (total_cards == 1)
-        # is_pair = (total_cards == 2) & (cnt.max(dim=2).values.max(dim=1).values == 2)
-        # tractor_mask = self.__is_tractor_batch(cnt)
-        # round_play_card_type = t.full((B,), fill_value=-1, device=cnt.device)
-        # round_play_card_type[is_single] = 0#单张
-        # round_play_card_type[is_pair] = 1#对子
-        # round_play_card_type[tractor_mask] = 2#拖拉机
-        # round_play_card_type[round_play_card_type == -1] = 3# 剩下的全部是甩牌
-
-
-
-        
-        ################################################################################
-
-        # #底牌，只有庄家知道
-        # public_card_feat = state_feat['public_card']
-        # seat_equal_mask = (my_seat_feat == banker_seat_feat).sum(1) == 4
-        # expanded_mask = seat_equal_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Shape: [B, 1, 1, 1]
-        # expanded_mask = expanded_mask.expand_as(public_card_feat)  # Shape: [B, 2, 4, 15]
-        # public_card_feat = public_card_feat * expanded_mask.float()# Zero out public_card_feat where mask is False
-
-
-
-        #多次动作组成的一轮数据，将多次打平成第三维 
-        b, a, c, d, e, f = play_card_history_feat.shape
-        play_card_history_feat = play_card_history_feat.reshape(b, a*c, d, e, f)
-        b, a, c, d = play_seat_history_feat.shape
-        play_seat_history_feat = play_seat_history_feat.reshape(b, a*c, d)
-        b, a, c, d, e = bid_card_history_feat.shape
-
-        bid_card_history_feat = bid_card_history_feat.reshape(b, a, c, d, e)
-        b, a, c = bid_seat_history_feat.shape
-        bid_seat_history_feat = bid_seat_history_feat.reshape(b, a, c)
-        b, a, c, d, e = play_card_round_feat.shape
-        play_card_round_feat = play_card_round_feat.reshape(b, a, c, d, e)
-        b, a, c = play_seat_round_feat.shape
-        play_seat_round_feat = play_seat_round_feat.reshape(b, a, c)
-        
-        card_feature_dict = {
-            'play_history': play_card_history_feat.reshape(-1, 2, 4, 15),
-            'bid_history': bid_card_history_feat.reshape(-1, 2, 4, 15),
-            'round_history': play_card_round_feat.reshape(-1, 2, 4, 15),
-            'played_history': played_card_history_feat,
-            'score_remain': score_remain_card_feat,
-            # 'public_card': public_card_feat,
-            'mask_card': mask_cards,
-        }
-
-        
-        # Concatenate all features along batch dimension
-        batched_features = t.cat(list(card_feature_dict.values()), dim=0)
-
-        # Single encoder call
-        encoded_features = self.card_encoder(batched_features)
-
-        # Split and reshape back
-        split_sizes = [v.shape[0] for v in card_feature_dict.values()]
-        split_features = t.split(encoded_features, split_sizes, dim=0)
-
-        # Reconstruct individual features
-        features_iter = iter(split_features)
-        play_card_history_enocdefeat = next(features_iter).reshape( play_card_history_feat.shape[0], play_card_history_feat.shape[1], -1)
-        bid_card_history_encodefeat = next(features_iter).reshape( bid_card_history_feat.shape[0], bid_card_history_feat.shape[1], -1)
-        round_card_history_encodefeat = next(features_iter).reshape( play_card_round_feat.shape[0], play_card_round_feat.shape[1], -1)
-        played_card_history_encodefeat = next(features_iter)
-        # score_card_encodefeat = next(features_iter)
-        score_remain_card_encodefeat = next(features_iter)
-        # public_card_encodefeat = next(features_iter)
-        mask_card_encodefeat = next(features_iter)
-
-        '''将原来4个人轮流出的动作展平，4个人各出一个动作为一个回合
-        再将原来4个人的座位号展平，再将两个特征拼接在一起，
-        也可以使用交替凭借，
-        不过，需要注意的是，在实际应用场景中，交替拼接可能不如传统的特征拼接有效，因为：
-        语义分离：交替拼接可能会破坏特征原有的语义结构
-        网络学习难度增加：神经网络可能更难从交错特征中学习模式
-        维度不匹配问题：如果两个张量的最后一维大小不同，交错拼接会更加复杂
-        这种拼接方式让LSTM能够：
-        独立学习卡牌出牌和座位位置的时间依赖关系
-        必要时分别关注卡牌特征和座位特征
-        清晰区分不同类型的特征'''
-        # play_card_history_enocdefeat = play_card_history_enocdefeat.reshape(int(play_card_history_enocdefeat.shape[0]/self.num_opps), self.num_opps, -1)
-        play_history_feat = t.cat([play_card_history_enocdefeat, play_seat_history_feat], dim=-1)
-        h_play, (_, _) = self.lstm(play_history_feat)
-        # 使用注意力机制替代直接取最后一个时间步
-        h_play_att = self.attention_play(play_history_feat) # [B, hidden_dim*2] -> [B, hidden_dim*2]
-        h_play += h_play_att
-
-        # bid_card_history_encodefeat = self.card_encoder(bid_card_history_feat)
-        bid_history_feat = t.cat([bid_card_history_encodefeat, bid_seat_history_feat], dim=-1)
-        h_bid, (_, _) = self.lstm(bid_history_feat)
-        # 使用注意力机制
-        h_bid_att = self.attention_bid(bid_history_feat) # [B, hidden_dim*2]
-        h_bid += h_bid_att
-
-        # round_card_history_encodefeat = self.card_encoder(play_card_round_feat)
-        round_history_feat = t.cat([round_card_history_encodefeat, play_seat_round_feat], dim=-1)
-        h_round, (_, _) = self.lstm(round_history_feat)
-        # 使用注意力机制
-        h_round_att = self.attention_round(round_history_feat) # [B, hidden_dim*2]
-        h_round += h_round_att
-
-        #挨个对扑克二维特征进行提取
-        # played_card_history_encodefeat = self.card_encoder(played_card_history_feat)
-        # score_card_encodefeat = self.card_encoder(score_card_feat)
-        # score_remain_card_encodefeat = self.card_encoder(score_remain_card_feat)
-        # public_card_encodefeat = self.card_encoder(public_card_feat)        
-        # mask_card_encodefeat = self.card_encoder(mask_card)
-
-        #特征融合
-        h_play = h_play.reshape(B, -1)
-        h_bid = h_bid.reshape(B, -1)
-        h_round = h_round.reshape(B, -1)
-        in_feat = t.cat([h_play, h_bid, h_round, 
-                             played_card_history_encodefeat, score_remain_card_encodefeat, 
-                             mask_card_encodefeat, my_seat_feat, banker_seat_feat], dim=-1)
-        
-        actionType = self.actionTypeModel.select_action(in_feat)
-
-        # #这两个加起来也就12ms左右
-        # opp_logits = t.stack([head(in_feat) for head in self.opp_heads], dim=0)  # [num_opps, B, CARD_COUNT]#预测4个玩家
-        # opp_logits.transpose_(1,0)
-
-        # #对超过手牌数的回归值上线进行截断
-        # # if isTrain:
-        # #     player_hand_card_num = player_hand_card_num.unsqueeze(-1).expand(-1, -1, opp_logits.shape[-1])
-        # #     opp_logits.clamp_(max=player_hand_card_num)
-            
-
-        # bottom_logits = self.bottom_head(in_feat)
-        # bottom_logits.squeeze_(1)
-        
-        # return opp_logits, bottom_logits
-
-
     def toDevice(self, device):
         self._device = device
         self.to(device)
-        self.card_encoder.toDevice(device)
-        self.action_type_net.to(device)
+        self.cards_encoder_tp.to(device)
+        self.cards_encoder_action.to(device)
+        self.strategy_net.to(device)
+        self.type_q_net.to(device)
         self.action_q_net.to(device)
 
     #计算模型大小

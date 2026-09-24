@@ -3,6 +3,118 @@ from collections import Counter
 from itertools import combinations
 from tractor_botzone import tractorGame
 
+
+def checkResUnSuspect_repsect(self, play_pok, own_pok, level): # poker: list[int]
+    poker_len = len(play_pok)
+    suit = play_pok[0][0]
+    # typoker = self.checkPokerType(play_pok, level)
+    ret = {'fixedcard':[], 'discard':[]}#分为固定牌和垫牌
+    #出的是主牌
+    if play_pok[0] in self.Major:
+        major_pok = [pok for pok in own_pok if pok in self.Major or pok[1] == level]
+        my_pok_count = Counter(major_pok)
+
+        #手上没有主牌
+        if len(my_pok_count) == 0:
+            ret['discard'] = own_pok
+
+        #单张
+        elif poker_len == 1:
+            ret['discard'] = major_pok
+            return ret
+        #对子
+        elif poker_len == 2:
+            ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
+            #没有对子，则用固定牌+垫牌组合
+            if len(ret['fixedcard']) == 0:
+                combpairs = list(combinations(major_pok, 2))
+                for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
+                #主牌不够
+                if len(ret['fixedcard']) == 0:
+                    ret['fixedcard'] = [major_pok]
+                    ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
+    
+            
+        # 主牌拖拉机
+        else:
+            deck_Major = major_pok
+            ret['fixedcard'] = self.parseTractorPoker(deck_Major, level, poker_len)
+
+            #没有拖拉机，看有没有对子
+            if len(ret['fixedcard']) == 0:                  
+                pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
+                #对子数>=出牌数
+                if len(pairspok) >= poker_len//2:
+                    combpairs = list(combinations(pairspok, poker_len//2))
+                    for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
+                        
+                #对子不够，单张来凑
+                else:
+                    singlepok = [p for p,v in my_pok_count.items() if v == 1]
+                    # if len(singlepok) + len(pairspok)*2 >= poker_len:
+                    singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
+                    pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
+                    for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
+                    #对子加单张都不够
+                    if len(ret['fixedcard']) == 0:
+                        ret['fixedcard'] = [deck_Major]
+                        ret['discard'] = [pok for pok in own_pok if pok not in self.Major]
+            
+            
+            
+    #出的是副牌
+    else:
+        suit_pok = [pok for pok in own_pok if pok[0] == suit and pok[1] != level]
+        my_pok_count = Counter(suit_pok)
+
+        #手上没有副牌
+        if len(my_pok_count) == 0:
+            ret['discard'] = own_pok
+
+        #单张
+        elif poker_len == 1:
+            ret['discard'] = suit_pok
+
+        #对子
+        elif poker_len == 2:
+            ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
+            #没有对子，则用固定牌+垫牌组合
+            if len(ret['fixedcard']) == 0:
+                combpairs = list(combinations(suit_pok, 2))
+                for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
+                #主牌不够
+                if len(ret['fixedcard']) == 0:
+                    ret['fixedcard'] = [suit_pok]
+                    ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
+            
+            
+        # 拖拉机
+        else:
+            deck_suit = suit_pok
+            ret['fixedcard'] = self.parseTractorPoker(deck_suit, level, poker_len)
+
+            #没有拖拉机，看有没有对子
+            if len(ret['fixedcard']) == 0:                  
+                pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
+                #对子数>=出牌数
+                if len(pairspok) >= poker_len//2:
+                    combpairs = list(combinations(pairspok, poker_len//2))
+                    for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
+                        
+                #对子不够，单张来凑
+                else:
+                    singlepok = [p for p,v in my_pok_count.items() if v == 1]
+                    # if len(singlepok) + len(pairspok)*2 >= poker_len:
+                    singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
+                    pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
+                    for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
+                    #对子加单张都不够
+                    if len(ret['fixedcard']) == 0:
+                        ret['fixedcard'] = [deck_suit]
+                        ret['discard'] = [pok for pok in own_pok if pok not in deck_suit]
+    return ret
+        
+
 # 假设 tractorGame 类和相关常量已经定义
 
 class TestCheckResUnSuspectRepsect(unittest.TestCase):

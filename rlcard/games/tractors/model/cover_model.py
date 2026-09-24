@@ -10,55 +10,38 @@ from torch.distributions import Categorical
 class CoverModel(nn.Module):
     def __init__(self):
         super().__init__()
-        hidden_dim = 512
+        hidden_dim = 1024
         
         self.resnet = ResNet(ResidualBlock, layers = [2,2,2,2 ], hidden_channels=[14,28,56,112], \
-                                        in_channels=2,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
+                                        in_channels=10,out_dim=hidden_dim, kernel_size=3, padding=1, stride=1)
         # self.lstm = nn.LSTM(162, 128, batch_first=True)
         
-        self.dense1 = nn.Linear(672, 1024)
-        self.dense2 = nn.Linear(1024, 1024)
+        self.dense1 = nn.Linear(1088, 2048)
+        self.dense2 = nn.Linear(2048, 1024)
         self.dense3 = nn.Linear(1024, 512)
-        self.dense4 = nn.Linear(512, 512)
-        self.dense5 = nn.Linear(512, 120)
+        self.dense4 = nn.Linear(512, 120)
 
-    def forward(self, obs_z, obs_x, mask, return_value=False, flags=None):
+    def forward(self, obs_z, obs_x, return_value=False, flags=None):
         x = self.resnet(obs_x)
         
         x = t.cat([obs_z, obs_z, obs_z, obs_z, x], dim=1)
         x = F.leaky_relu_(self.dense1(x))
         x = F.leaky_relu_(self.dense2(x))
         x = F.leaky_relu_(self.dense3(x))
-        x = F.leaky_relu_(self.dense4(x))
-        x = F.leaky_relu_(self.dense5(x))
+        output = self.dense4(x)
         
-        
-        if return_value: 
-            x = x.reshape(x[0], 2, 4, 15)
-            out = x * mask           
-            return dict(action=out)
+        if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+            #随机探索, 手牌会不会探索到不存在的牌值？
+            action = t.rand(obs_x.shape[0], 2*4*15)
+                    
         else:
-            if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
-                #随机探索, 手牌会不会探索到不存在的牌值？
-                mask_shape = mask.shape
-                mask = mask.reshape(mask.shape[0], -1)
-                action = t.multinomial(mask.float(), num_samples=8, replacement=False).squeeze(1)
-                action = action.reshape(mask_shape)
+            output = t.sigmoid(output)
+            action = output
             
-            else:
-                mask_shape = mask.shape
-                x = x.reshape((x.shape[0], 2, 4, 15))
-                out = x * mask
-                out = out.reshape(out.shape[0], -1)
-                top_k_values, top_k_indices = t.topk(out, k=8, dim=1)
-                action = t.zeros_like(out)
-                action.scatter_(1, top_k_indices, 1.0)
-                action = action.reshape(mask_shape)
-            # return dict(score=y_score_out, y_suit=y_suit_out, score_values=y_score, suit_values=y_suit)
-            if return_value: 
-                return dict(action = action, values = (out, top_k_indices))
-            else:
-                return dict(action = action)
+        if return_value: 
+            return dict(action = action, values=(output,))
+        else:
+            return dict(action = action)
         
         
 

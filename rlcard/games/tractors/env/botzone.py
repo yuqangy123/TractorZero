@@ -1,5 +1,5 @@
 import enum
-import random, os, signal
+import random, os, signal, time
 # from utils import *
 import json
 from collections import Counter, deque
@@ -33,6 +33,20 @@ NumOnes2Array = {0: np.array([0, 0, 0, 0]),
                  3: np.array([1, 1, 1, 0]),
                  4: np.array([1, 1, 1, 1])}
 
+# 预计算牌面字符 -> 索引的映射，避免热路径上 O(n) 的 list.index() 调用
+__CARDSCALE_IDX__ = {c: i for i, c in enumerate(__CARDSCALE__)}
+__SUITSET_IDX__ = {s: i for i, s in enumerate(__SUITSET__)}
+
+
+def _poker2num_value(poker):
+    """牌字符 -> 单副牌内编号 (0-53)，不含两副牌偏移。"""
+    if poker[0] == "j":
+        return 52
+    if poker[0] == "J":
+        return 53
+    return __CARDSCALE_IDX__[poker[1]] * 4 + __SUITSET_IDX__[poker[0]]
+
+
 class tractorGame():
     def __init__(self):
         self.errored = [[] for _ in range(__PLAYER_COUNT__)]
@@ -40,9 +54,11 @@ class tractorGame():
         self.get_score = 0 # 闲家得分，每次step前清空一下该值
         self.get_score_pok=[]# 得分牌，每次step前清空一下该值
         self.globalInfo = {"stage":"gameend"} # 未确定主花色前为空
+        self.play_seq = []#玩家出牌序列  数组元素数据结构：[player, card, card_type]
         
         self.step_count = -1 # 一局里面的步数, -1是未在对局中
         self.player_hand_cards = [[] for _ in range(__PLAYER_COUNT__)] # 每位玩家手牌
+        self.player_hand_decks = [[] for _ in range(__PLAYER_COUNT__)] # 每位玩家手牌
         self.player_played_cards = [[] for _ in range(__PLAYER_COUNT__)] # 各玩家已经出过的牌
         self.player_level = ['2' for _ in range(__PLAYER_COUNT__)] # 各玩家当前的级数
         self.total_score = [0 for _ in range(__PLAYER_COUNT__)] # 玩家的总分数
@@ -50,7 +66,9 @@ class tractorGame():
         self.logs = []
         self.erro_code = 0
         self._final_ended = False
-    
+        self._eval_deals = None      # 固定发牌数据 {level: [deal, ...]}
+        self._eval_deal_idx = {}     # 每个级数已消费到第几局的游标
+      
     def num2Poker(self, num): # num: int-[0,107]
         # Already a poker
         if type(num) is str and (num in self.Major or (num[0] in __SUITSET__ and num[1] in __CARDSCALE__)):
@@ -67,52 +85,39 @@ class tractorGame():
         pokersuit = __SUITSET__[NumInDeck % 4]
         return pokersuit + pokernumber
 
-    def Poker2Num(self, poker, deck): # poker: str
-        NumInDeck = -1
-        if poker[0] == "j":
-            NumInDeck = 52
-        elif poker[0] == "J":
-            NumInDeck = 53
-        else:
-            NumInDeck = __CARDSCALE__.index(poker[1])*4 + __SUITSET__.index(poker[0])
+     # poker: str
+     # deck: int list
+    def Poker2Num(self, poker, deck):
+        NumInDeck = _poker2num_value(poker)
         return NumInDeck if NumInDeck in deck else NumInDeck + 54
         
         
     #pokers是个二维数组，每个元素是个list，list是个扑克牌列表
-    def PokerList2Num(self, pokers, deck): # poker: str        
+    def PokerList2Num(self, pokers, deck): # poker: str
         numDesk = []
+        # deck 为两副牌中的物理编号(0-107, 互不相同)；同一牌值最多出现两次(单副/双副)。
+        # 用 set + 每动作内 consumed 计数替代原来的 _deck[:] 拷贝 + list.remove，避免 O(n) 查找与删除。
+        deck_set = set(deck)
         for _pokers in pokers:
             rule_poker = []
-            _deck = deck.copy()
+            consumed = {}
             for poker in _pokers:
-                NumInDeck = -1
-                if poker[0] == "j":
-                    NumInDeck = 52
-                elif poker[0] == "J":
-                    NumInDeck = 53
+                NumInDeck = _poker2num_value(poker)
+                if consumed.get(NumInDeck, 0) == 0:
+                    p = NumInDeck if NumInDeck in deck_set else NumInDeck + 54
                 else:
-                    NumInDeck = __CARDSCALE__.index(poker[1])*4 + __SUITSET__.index(poker[0])
-                
-                p = NumInDeck if NumInDeck in _deck else NumInDeck + 54
+                    p = NumInDeck + 54
+                consumed[NumInDeck] = consumed.get(NumInDeck, 0) + 1
                 rule_poker.append(p)
-                if p not in _deck:# test code
-                    pass
-                _deck.remove(p)
             numDesk.append(rule_poker)
         return numDesk
 
     #pokers 是个扑克牌列表 环境编码
-    def Pokers2Num(self, pokers, deck): # poker: str        
+    def Pokers2Num(self, pokers, deck): # poker: str
         numDesk = []
         _deck = deck.copy()
         for poker in pokers:
-            NumInDeck = -1
-            if poker[0] == "j":
-                NumInDeck = 52
-            elif poker[0] == "J":
-                NumInDeck = 53
-            else:
-                NumInDeck = __CARDSCALE__.index(poker[1])*4 + __SUITSET__.index(poker[0])
+            NumInDeck = _poker2num_value(poker)
             p = NumInDeck if NumInDeck in _deck else NumInDeck + 54
             numDesk.append(p)
             if p not in _deck:
@@ -133,7 +138,8 @@ class tractorGame():
         
         #数字牌
         self.MajorCards = self.Pokers2Num(self.Major, list(range(0, 108)))
-        
+        #两副牌
+        self.MajorCards = self.MajorCards + [item + 54 for item in self.MajorCards]
         self.pointorder.remove(level)
     ###############################################################
     # 报错模块
@@ -192,6 +198,8 @@ class tractorGame():
 
     # return: pokertype(str)
     def checkPokerType(self, poker, level): #poker: list[int]
+        if len(poker) == 0: # 空出牌不构成任何合法牌型，避免 poker[0] 越界
+            return __SUSPECT__
         poker = [self.num2Poker(p) for p in poker] if type(poker[0])==int else poker
         if len(poker) == 1:
             return __SINGLE__ #一张牌必定为单牌
@@ -407,6 +415,23 @@ class tractorGame():
     # 先确定好发给每个人的25张牌，再进行逐一发牌
     ###############################################################
 
+    def set_eval_deals(self, deals):
+        """注入固定发牌数据：{level: [{'allocation':..., 'publiccard':...}, ...]}"""
+        self._eval_deals = deals
+        self._eval_deal_idx = {level: 0 for level in deals}
+
+    def _next_eval_deal(self, level):
+        """按级数顺序取下一局预生成的发牌；数据缺失或用尽则返回 None（回退随机发牌）。"""
+        if not self._eval_deals or level not in self._eval_deals:
+            return None
+        deals = self._eval_deals[level]
+        idx = self._eval_deal_idx.get(level, 0)
+        if idx >= len(deals):
+            return None
+        deal = deals[idx]
+        self._eval_deal_idx[level] = idx + 1
+        return deal
+
     def initGame(self):
         seedRandom = str(random.randint(0, 2147483000))
         full_input = {}
@@ -424,6 +449,13 @@ class tractorGame():
             seedRandom = full_input["initdata"]["seed"] 
         
         random.seed(seedRandom)
+
+        # 固定发牌注入：按当前级数取预生成的发牌（用于评估可复现）。
+        # 首局 globalInfo 尚无 level，默认按 "2" 取。
+        eval_deal = self._next_eval_deal(self.globalInfo.get("level", "2"))
+        if eval_deal is not None:
+            return full_input, seedRandom, eval_deal["allocation"], eval_deal["publiccard"]
+
         if "allocation" in full_input["initdata"]:
             allocation = full_input["initdata"]["allocation"]
         else:
@@ -463,6 +495,13 @@ class tractorGame():
             self.globalInfo["publiccard"] = initdata["publiccard"]
             self.globalInfo['playedcard'] = []#已出牌
             
+            # 跨局状态重置：否则新一局会带入上一局的出牌记录/步数/错误
+            self.player_played_cards = [[] for _ in range(__PLAYER_COUNT__)]
+            self.play_seq = []
+            self.step_count = -1
+            self.errored = [[] for _ in range(__PLAYER_COUNT__)]
+            self.erro_code = 0
+            
             
             #初始化banking
             if "banking" not in self.globalInfo: # 没有规定摸牌方
@@ -470,38 +509,45 @@ class tractorGame():
                 banking = {
                 "called": [],
                 "major": "",
-                "banker": -1
+                "banker": -1,
+                'banker_last': 0,
                 } 
             else:
                 first = self.globalInfo["banking"]["banker"]
-                # initdata["banker"] = first
                 banking = {
                 "called": [],
                 "major": "",
-                "banker": first
+                "banker": first,
+                'banker_last': self.globalInfo["banking"]["banker_last"],
                 } 
                 
-            self.globalInfo["stage"] = "deal"
-            # self.globalInfo["deliver"] = [allocation[first][0]]#发的牌
             self.globalInfo["banking"] = banking
             self.globalInfo["playerpos"] = first
-            
-            #直接一次性发完牌
-            self.player_hand_cards = [hand_cards for hand_cards in allocation]
-            # self.player_hand_cards[first].append(allocation[first][0])
-            self.globalInfo["stage"] = "bid"
+            self.globalInfo["first_dealer"] = first
+
+            # 轮流发牌：每位玩家每次发一张牌，发完一张后进入叫主阶段
+            self.player_hand_cards = [[] for _ in range(__PLAYER_COUNT__)]
+            self.player_hand_decks = [[] for _ in range(__PLAYER_COUNT__)]
+            self.globalInfo["dealt"] = 0
+            self.globalInfo["deal_count"] = [0] * __PLAYER_COUNT__
             self.globalInfo["bid_seq"] = []
             
-            all_hand_cards = {i:0 for i in range(108)}            
-            for hand_cards in self.player_hand_cards:
-                    for c in hand_cards:
-                        all_hand_cards[c] += 1
-                        if all_hand_cards[c] > 1:
-                            raise ValueError("repeated hand card card:", c)
+            # 先发第一张牌给 first，随后每次叫主后继续发下一张
+            self._deal_to(first)
+            self.globalInfo["stage"] = "bid"
             
         elif self.globalInfo["stage"] == "finalend":
-            self.globalInfo["first_round"] = None
-            self.globalInfo["stage"] = "gameend"
+            # 新大局必须在发牌前清除旧等级和庄家；普通 gameend 则保留升级结果。
+            # 保留固定发牌数据及消费游标、日志开关等环境配置。
+            self.globalInfo = {"stage": "gameend"}
+            self.player_level = ['2' for _ in range(__PLAYER_COUNT__)]
+            self.total_score = [0 for _ in range(__PLAYER_COUNT__)]
+            self.Major = __MAJOR__.copy()
+            self.MajorCards = []
+            self.pointorder = __POINT__.copy()
+            self.get_score = 0
+            self.get_score_pok = []
+            self._final_ended = False
             self.reset()
         
     ###############################################################
@@ -527,6 +573,7 @@ class tractorGame():
             newbanking["major"] = poker[0]
             if first_round:
                 newbanking["banker"] = currplayer
+                
             return newbanking
         if len(repo) == 2: # 对子反主
             if  len(banking["called"]) == 0 or len(banking["called"]) == __PLAYER_COUNT__-1: # 还未报主或已经反主
@@ -540,6 +587,7 @@ class tractorGame():
                     newbanking["major"] = "n"
                     if first_round:
                         newbanking["banker"] = currplayer
+                        
                     return newbanking
                 self.setError(currplayer, "ILLEGAL_MOVE")
             banking["called"].append(currplayer)
@@ -586,6 +634,9 @@ class tractorGame():
 
         if __SUSPECT__ in type:
             tr = self.parseSuspectPoker(own_pok, level, self.globalInfo["banking"]["major"])
+            if tr:
+                max_len = max(len(pok) for pok in tr)
+                tr = [pok for pok in tr if len(pok) >= max_len - 2]
             rule_poks[__SUSPECT__].extend(tr)
 
         return rule_poks
@@ -658,6 +709,8 @@ class tractorGame():
     def checkResUnSuspect(self, play_pok, own_pok, level): # poker: list[int]
         poker_len = len(play_pok)
         suit = play_pok[0][0]
+        all_hands = [[] for _ in range(__WRONG__)]
+        
         # typoker = self.checkPokerType(play_pok, level)
         #出的是主牌
         if play_pok[0] in self.Major:
@@ -666,45 +719,58 @@ class tractorGame():
 
             #单张或对子         
             if poker_len <= 2:
+                card_type = __SINGLE__ if poker_len == 1 else __PAIR__
                 ret = []
+                
                 for k,v in my_pok_count.items():
                     if v >= poker_len:
                         ret.append([k]*poker_len)
-
+                        
                 if len(major_pok) < poker_len:
                     unmajor_pok = [pok for pok in own_pok if pok not in major_pok]
                     ret = [major_pok+list(pok) for pok in list(combinations(unmajor_pok, poker_len-len(major_pok)))]
+                    card_type = __DISCARD__
                 elif len(ret) == 0:              
                     ret.extend(list(combinations(major_pok, poker_len)))
-                return ret
+                
+                all_hands[card_type].extend(ret)
+                return all_hands
                 
             # 主牌拖拉机
             else: 
                 # deck_Major = [pok for pok in own_pok if pok in self.Major]
                 deck_Major = major_pok
+                card_type = __TRACTOR__
                 ret = self.parseTractorPoker(deck_Major, level, poker_len)
                 
-                #没有拖拉机，看有没有对子
-                if len(ret) == 0:                  
-                    pairspok = [p for p,v in my_pok_count.items() if v == 2]
-                    #对子数>=出牌数
-                    if len(pairspok) >= poker_len//2:
-                        combpairs = list(combinations(pairspok, poker_len//2))
-                        for pairs_pok in combpairs: ret.append(pairs_pok*2)
-                            
-                    #对子数不够，用对子+单牌组合
-                    else:
-                        singlepok = [p for p,v in my_pok_count.items() if v == 1]                      
-                        fixed_pok = pairspok*2
-
-                        #(对子+单牌)的数量<出牌数，则将所有的牌加进来                        
-                        if len(fixed_pok) + len(singlepok) < poker_len:
-                            fixed_pok += singlepok
-                            singlepok = [pok for pok in own_pok if pok not in deck_Major]
-                            
-                        ret = [fixed_pok + list(poks) for poks in combinations(singlepok, poker_len-len(fixed_pok))]
-                return ret
+                if len(ret) > 0:
+                    all_hands[card_type].extend(ret)
+                    return all_hands
                 
+                #没有拖拉机，看有没有对子
+                pairspok = [p for p,v in my_pok_count.items() if v == 2]
+                #对子数>=出牌数
+                if len(pairspok) >= poker_len//2:
+                    combpairs = list(combinations(pairspok, poker_len//2))
+                    for pairs_pok in combpairs: ret.append(pairs_pok*2)
+                        
+                #对子数不够，用对子+单牌组合
+                else:
+                    singlepok = [p for p,v in my_pok_count.items() if v == 1]                      
+                    fixed_pok = pairspok*2
+
+                    #(对子+单牌)的数量<出牌数，则将所有的牌加进来                        
+                    if len(fixed_pok) + len(singlepok) < poker_len:
+                        fixed_pok += singlepok
+                        singlepok = [pok for pok in own_pok if pok not in deck_Major]
+                        card_type = __DISCARD__
+                        
+                    ret = [fixed_pok + list(poks) for poks in combinations(singlepok, poker_len-len(fixed_pok))]
+                
+                all_hands[card_type].extend(ret)
+                return all_hands
+            
+                            
                 
         #出的是副牌
         else:
@@ -714,159 +780,64 @@ class tractorGame():
 
             #单张或对子
             if poker_len <= 2:
+                card_type = __SINGLE__ if poker_len == 1 else __PAIR__
                 ret = []
+                
                 for k,v in my_pok_count.items():
                     if v >= poker_len:
                         ret.append([k]*poker_len)
-                
+
                 if len(suit_pok) < poker_len:
                     unsuit_pok = [pok for pok in own_pok if pok[0] != suit or pok[1] == level]
                     ret = [suit_pok+list(pok) for pok in list(combinations(unsuit_pok, poker_len-len(suit_pok)))]
+                    card_type = __DISCARD__
                 elif len(ret) == 0:
                     ret.extend(list(combinations(suit_pok, poker_len)))
-                return ret
+                    
+                all_hands[card_type].extend(ret)
+                return all_hands
             
             #副牌拖拉机
             else:
+                card_type = __TRACTOR__
                 ret = self.parseTractorPoker(suit_pok, level, poker_len)
-                #没有副拖拉机
-                if len(ret) == 0:
-                    #看有没有主牌拖拉机
-                    deck_Major = [pok for pok in own_pok if pok in self.Major]
-                    ret = self.parseTractorPoker(deck_Major, level, poker_len)
+                
+                if len(ret) > 0:                    
+                    all_hands[card_type].extend(ret)
+                    return all_hands
+                
+                #没有副拖拉机，看有没有主牌拖拉机
+                deck_Major = [pok for pok in own_pok if pok in self.Major]
+                ret = self.parseTractorPoker(deck_Major, level, poker_len)
+                
+                if len(ret) > 0:
+                    all_hands[card_type].extend(ret)
+                    return all_hands
+                
+                #其他牌
+                ret = []
+                pairspok = [p for p,v in my_pok_count.items() if v == 2]                    
+                #对子数>=出牌数
+                if len(pairspok) >= poker_len//2:
+                    combpairs = list(combinations(pairspok, poker_len//2))
+                    for pairs_pok in combpairs: ret.append(pairs_pok*2)
                     
-                    #其他牌
-                    pairspok = [p for p,v in my_pok_count.items() if v == 2]                    
-                    #对子数>=出牌数
-                    if len(pairspok) >= poker_len//2:
-                        combpairs = list(combinations(pairspok, poker_len//2))
-                        for pairs_pok in combpairs: ret.append(pairs_pok*2)
-                        
-                    #对子数不够，用对子+单牌组合
-                    else:
-                        singlepok = [p for p,v in my_pok_count.items() if v == 1]
-                        fixed_pok = pairspok*2
+                #对子数不够，用对子+单牌组合
+                else:
+                    singlepok = [p for p,v in my_pok_count.items() if v == 1]
+                    fixed_pok = pairspok*2
 
-                        #(对子+单牌)的数量<出牌数，则将所有的牌加进来
-                        if len(fixed_pok) + len(singlepok) < poker_len:
-                            fixed_pok += singlepok
-                            singlepok = [pok for pok in own_pok if pok[0] != suit or pok[1] == level]
-                            
-                        ret.extend([fixed_pok + list(poks) for poks in combinations(singlepok, poker_len-len(fixed_pok))])
-                return ret
-
-    def checkResUnSuspect_repsect(self, play_pok, own_pok, level): # poker: list[int]
-        poker_len = len(play_pok)
-        suit = play_pok[0][0]
-        # typoker = self.checkPokerType(play_pok, level)
-        ret = {'fixedcard':[], 'discard':[]}#分为固定牌和垫牌
-        #出的是主牌
-        if play_pok[0] in self.Major:
-            major_pok = [pok for pok in own_pok if pok in self.Major or pok[1] == level]
-            my_pok_count = Counter(major_pok)
-
-            #手上没有主牌
-            if len(my_pok_count) == 0:
-                ret['discard'] = own_pok
-
-            #单张
-            elif poker_len == 1:
-                ret['discard'] = major_pok
-                return ret
-            #对子
-            elif poker_len == 2:
-                ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
-                #没有对子，则用固定牌+垫牌组合
-                if len(ret['fixedcard']) == 0:
-                    combpairs = list(combinations(major_pok, 2))
-                    for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
-                    #主牌不够
-                    if len(ret['fixedcard']) == 0:
-                        ret['fixedcard'] = [major_pok]
-                        ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
-        
+                    #(对子+单牌)的数量<出牌数，则将所有的牌加进来
+                    if len(fixed_pok) + len(singlepok) < poker_len:
+                        fixed_pok += singlepok
+                        singlepok = [pok for pok in own_pok if pok[0] != suit or pok[1] == level]
+                        card_type = __DISCARD__
+                    ret.extend([fixed_pok + list(poks) for poks in combinations(singlepok, poker_len-len(fixed_pok))])
                 
-            # 主牌拖拉机
-            else:
-                deck_Major = major_pok
-                ret['fixedcard'] = self.parseTractorPoker(deck_Major, level, poker_len)
+                all_hands[card_type].extend(ret)
+                return all_hands
 
-                #没有拖拉机，看有没有对子
-                if len(ret['fixedcard']) == 0:                  
-                    pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
-                    #对子数>=出牌数
-                    if len(pairspok) >= poker_len//2:
-                        combpairs = list(combinations(pairspok, poker_len//2))
-                        for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
-                            
-                    #对子不够，单张来凑
-                    else:
-                        singlepok = [p for p,v in my_pok_count.items() if v == 1]
-                        # if len(singlepok) + len(pairspok)*2 >= poker_len:
-                        singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
-                        pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
-                        for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
-                        #对子加单张都不够
-                        if len(ret['fixedcard']) == 0:
-                            ret['fixedcard'] = [deck_Major]
-                            ret['discard'] = [pok for pok in own_pok if pok not in self.Major]
-                
-                
-                
-        #出的是副牌
-        else:
-            suit_pok = [pok for pok in own_pok if pok[0] == suit and pok[1] != level]
-            my_pok_count = Counter(suit_pok)
-
-            #手上没有副牌
-            if len(my_pok_count) == 0:
-                ret['discard'] = own_pok
-
-            #单张
-            elif poker_len == 1:
-                ret['discard'] = suit_pok
-
-            #对子
-            elif poker_len == 2:
-                ret['fixedcard'] = [[k,k] for k,v in my_pok_count.items() if v == 2]
-                #没有对子，则用固定牌+垫牌组合
-                if len(ret['fixedcard']) == 0:
-                    combpairs = list(combinations(suit_pok, 2))
-                    for pairs_pok in combpairs: ret['fixedcard'].append(list(pairs_pok))
-                    #主牌不够
-                    if len(ret['fixedcard']) == 0:
-                        ret['fixedcard'] = [suit_pok]
-                        ret['discard'] = [k for k,v in Counter(own_pok).items() if k not in self.Major]
-                
-                
-            # 拖拉机
-            else:
-                deck_suit = suit_pok
-                ret['fixedcard'] = self.parseTractorPoker(deck_suit, level, poker_len)
-
-                #没有拖拉机，看有没有对子
-                if len(ret['fixedcard']) == 0:                  
-                    pairspok = [[p,p] for p,v in my_pok_count.items() if v == 2]
-                    #对子数>=出牌数
-                    if len(pairspok) >= poker_len//2:
-                        combpairs = list(combinations(pairspok, poker_len//2))
-                        for pairs_pok in combpairs: ret['fixedcard'].append([pairs_pok[0][0]]*2+[pairs_pok[1][0]]*2)
-                            
-                    #对子不够，单张来凑
-                    else:
-                        singlepok = [p for p,v in my_pok_count.items() if v == 1]
-                        # if len(singlepok) + len(pairspok)*2 >= poker_len:
-                        singleCombpairs = list(combinations(singlepok, poker_len-len(pairspok)*2))
-                        pairspok = [p for p,v in my_pok_count.items() if v == 2]*2
-                        for pairs_pok in singleCombpairs: ret['fixedcard'].append(pairspok+list(pairs_pok))
-                        #对子加单张都不够
-                        if len(ret['fixedcard']) == 0:
-                            ret['fixedcard'] = [deck_suit]
-                            ret['discard'] = [pok for pok in own_pok if pok not in deck_suit]
-        return ret
-            
-
-       
+    
     # return outpok(The actual move if the move is legal; If illegal, report error)
     def checkLegalMove(self, poker, level, major, currplayer, history, own, banker): # own: All players' hold before this move
     # poker: list[int] player's move
@@ -1044,6 +1015,14 @@ class tractorGame():
                         
         return outpok
 
+    # 取一手牌中最强的一张，用于比较大小
+    # 牌型合法性已保证同组牌花色/牌型一致，故最强牌即该组牌的代表牌
+    # 注意：必须按「最大牌」而非「末位牌」比较，否则拖拉机等连对牌型的胜负会随出牌顺序变化
+    def _strongestCard(self, cards, in_major):
+        if in_major:
+            return max(cards, key=lambda c: self.Major.index(c))
+        return max(cards, key=lambda c: self.pointorder.index(c[-1]))
+
     # 在每轮最后一名玩家行动后触发判定，接收该轮历史行动及玩家本次出牌，判定胜方和分值
     # 对于甩牌，盖毙只判定最大牌型的大小
     # return winner(int: player ID)
@@ -1098,7 +1077,9 @@ class tractorGame():
                         continue
                     win_parse, s = self.checkThrow(history[win_seq], [[]], currplayer, level, major, check=False)
                     win_parse.sort(key=lambda x: len(x), reverse=True)
-                    if self.Major.index(win_parse[0][-1]) < self.Major.index(move_parse[0][-1]):
+                    # 取最大牌型组里的最强牌比较，与出牌顺序无关
+                    if self.Major.index(self._strongestCard(win_parse[0], True)) < \
+                       self.Major.index(self._strongestCard(move_parse[0], True)):
                         win_move = hist[i]
                         win_seq = i
                 else: 
@@ -1118,7 +1099,7 @@ class tractorGame():
                             if self.Major[move_max] == 'jo' or self.Major[move_max] == 'Jo':
                                 win_move = hist[i]
                                 win_seq = i
-                        elif self.Major.index(move_max) > self.Major.index(win_max):
+                        elif move_max > win_max:
                             win_move = hist[i]
                             win_seq = i
                     elif self.Major[win_max][1] == level and self.Major[win_max][0] != major:
@@ -1144,27 +1125,31 @@ class tractorGame():
                     if hist[i][0] not in self.Major: # 副牌就不用看了
                         continue
                     #print("here")
+                    # 取双方最强牌比较，与出牌顺序无关
+                    win_best = self._strongestCard(win_move, True)
+                    move_best = self._strongestCard(hist[i], True)
                     if major == 'n':
-                        if win_move[-1][1] == level:
-                            if hist[i][-1] == 'jo' or hist[i][-1] == 'Jo': # 目前胜牌是级牌，只有大小王能压
+                        if win_best[1] == level:
+                            if move_best == 'jo' or move_best == 'Jo': # 目前胜牌是级牌，只有大小王能压
                                 win_move = hist[i]
                                 win_seq = i
-                        elif self.Major.index(hist[i][-1]) > self.Major.index(win_move[-1]):
+                        elif self.Major.index(move_best) > self.Major.index(win_best):
                             win_move = hist[i]
                             win_seq = i
                     else:
-                        if win_move[-1][0] != major and win_move[-1][1] == level:
-                            if (hist[i][-1][0] == major and hist[i][-1][1] == level) or hist[i][-1] == 'jo' or hist[i][-1] == 'Jo':
+                        if win_best[0] != major and win_best[1] == level:
+                            if (move_best[0] == major and move_best[1] == level) or move_best == 'jo' or move_best == 'Jo':
                                 win_move = hist[i]
                                 win_seq = i
-                        elif self.Major.index(hist[i][-1]) > self.Major.index(win_move[-1]):
+                        elif self.Major.index(move_best) > self.Major.index(win_best):
                             win_move = hist[i]
                             win_seq = i
                 else: # 副牌存在被主牌压的情况
                     if hist[i][0] in self.Major: # 主牌，正确牌型，必压
                         win_move = hist[i]
                         win_seq = i
-                    elif self.pointorder.index(win_move[0][-1]) < self.pointorder.index(hist[i][0][-1]):
+                    elif self.pointorder.index(self._strongestCard(win_move, False)[-1]) < \
+                         self.pointorder.index(self._strongestCard(hist[i], False)[-1]):
                         win_move = hist[i]
                         win_seq = i
         # 找到获胜方，加分
@@ -1181,6 +1166,8 @@ class tractorGame():
 
     # return endingScores(dict)
     def EndGame(self, banker, score):
+        # 在换庄/升级之前冻结本局庄家；finalend 的提前退出也必须保留它。
+        self.globalInfo["banking"]["banker_last"] = banker
         endingScores = [0]*__PLAYER_COUNT__
         bankers = [banker, (banker + 2) % __PLAYER_COUNT__]
         up_level_step = 1#晋升的级数
@@ -1193,48 +1180,50 @@ class tractorGame():
                     self.total_score[i] += 3
                     endingScores[i] = 3
                 else: 
-                    endingScores[i] = 0
-        elif score < bid_score/2.: # 小光，庄家得2分
+                    endingScores[i] = -3
+        elif score < 40.: # 小光，庄家得2分
             up_level_step = 2
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
                     self.total_score[i] += 2
                     endingScores[i] = 2
                 else:
-                    endingScores[i] = 0
-        elif score < bid_score: # 庄家得1分
+                    endingScores[i] = -2
+        elif score < 80: # 庄家得1分
             up_level_step = 1
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
                     self.total_score[i] += 1
                     endingScores[i] = 1
                 else:
-                    endingScores[i] = 0
-        elif score < bid_score*2: # 闲家得1分
+                    endingScores[i] = -1
+        elif score < 120: # 闲家得1分
             up_level_step = 0
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[i] = 0
+                    endingScores[i] = -1
                 else:
                     self.total_score[i] += 1
                     endingScores[i] = 1
-        elif score < bid_score*2: # 闲家得2分
+        elif score < 160: # 闲家得2分
             up_level_step = 1
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[i] = 0
+                    endingScores[i] = -2
                 else:
                     self.total_score[i] += 2
                     endingScores[i] = 2
-        else: 
+        else:  # 闲家得3分
             up_level_step = 2
             for i in range(__PLAYER_COUNT__):
                 if i in bankers:
-                    endingScores[i] = 0
+                    endingScores[i] = -3
                 else:
                     self.total_score[i] += 3
-                    endingScores[i] = 3                 
+                    endingScores[i] = 3
             
+        # todo
+        #print(f"banker_win:{banker_win}, banker:{banker}, score:{score}, endingScores:{endingScores}, level:{self.globalInfo['level']}")
         
         # 点数升级，更新庄家位置
         while True:
@@ -1249,7 +1238,7 @@ class tractorGame():
                 new_lv_index = min(new_lv_index, len(__POINT__)-1)
                 
                 for bk in bankers:
-                    self.player_level[bk] = __POINT__[new_lv_index]            
+                    self.player_level[bk] = __POINT__[new_lv_index]
                 self.globalInfo["banking"]["banker"] = (banker+2)%__PLAYER_COUNT__
             else:
                 idle_lv = self.player_level[(banker+1)%__PLAYER_COUNT__]
@@ -1269,15 +1258,14 @@ class tractorGame():
             self.globalInfo["level"] = __POINT__[new_lv_index]
             break
         
-            
+        #todo
+        # print(f"new banker:{self.globalInfo["banking"]["banker"]}, level:{self.globalInfo['level']}")
         
         self.globalInfo["ending_score"] = endingScores
         return endingScores
 
     #获取玩家手牌
     def getPlayerHandCards(self, pos):
-        if pos >= len(self.player_hand_cards):
-            pass
         return self.player_hand_cards[pos][:]
     
     #获取当前叫的主的花色
@@ -1285,12 +1273,36 @@ class tractorGame():
         return self.globalInfo["banking"]["major"]
     
     #获取当前主牌
-    def getMajorCards(self):
-        return self.MajorCards[:]
+    def getMajorCards(self, major=None, level=None):
+        if major == None and level == None:
+            return self.MajorCards[:]
+        
+        assert major != None
+        assert level != None
+        
+        MajorCards = __MAJOR__.copy()
+        if major != 'n' and major != '': # 非无主
+            MajorCards = [major+point for point in __POINT__ if point != level] + [suit + level for suit in __SUITSET__ if suit != major] + [major + level] + MajorCards
+        elif major == 'n': # 无主
+            MajorCards = [suit + level for suit in __SUITSET__] + MajorCards
+        elif major == '': # 不叫主
+            MajorCards = [] 
+        
+        #数字牌
+        MajorCards = self.Pokers2Num(MajorCards, list(range(0, 108)))
+        #两副牌
+        if len(MajorCards) > 0:
+            MajorCards = MajorCards + [item + 54 for item in MajorCards]
+        return MajorCards
+            
     
     #获取当前的庄家
     def getBanker(self):
         return self.globalInfo["banking"]["banker"]
+    
+    #获取上局的庄家
+    def getLastBanker(self):
+        return self.globalInfo["banking"]["banker_last"]
     
     #获取当前打第几级
     def getLevel(self):
@@ -1306,7 +1318,7 @@ class tractorGame():
     
     #获取目前所有局的总结算分
     def getTotalScore(self, pos):
-        return self.globalInfo["total_score"][pos]
+        return self.total_score[pos]
     
     #获取当局结算分
     def getEndingScore(self, pos):
@@ -1319,8 +1331,21 @@ class tractorGame():
     # 获取上一轮次的分数
     def getLastRoundScore(self):
         return self.get_score
+    
     def getLastRoundScorePoke(self):
         return self.get_score>0 and self.get_score_pok or []
+    
+    
+    #获取上一手的出牌信息
+    def getLastPlayCards(self):
+        if len(self.play_seq) > 0:
+            return self.play_seq[-1]
+        # if len(self.globalInfo["history"][1]) > 0:
+        #     return self.globalInfo["history"][1][-1][:]
+        # else:
+        #     if len(self.globalInfo["history"][0]) > 0:
+        #         return self.globalInfo["history"][0][-1][:]
+        return []
         
     # 获取错误码
     def getErrorCode(self):
@@ -1347,31 +1372,94 @@ class tractorGame():
     #获取当前权位玩家位置
     def getPlayerPosition(self):
         return self.globalInfo["playerpos"]
+    
     #获取玩家剩余手牌数量
     def getPlayerLeftHandCards(self, pos):
         return len(self.player_hand_cards[pos])
+    
+    #获取当前手牌中的主牌
+    def getPlayerLeftMajorCards(self, pos):
+        major_cards = [poker for poker in self.player_hand_decks[pos] if poker in self.MajorCards]
+        return len(major_cards)
+    
     #获取上一轮出牌历史
     def getLastRoundPlayHistory(self):
         return self.globalInfo["history"][0]
+    
     #获取上一轮的首出牌人位置
     def getLastRoundPlaySeat(self):
         return self.globalInfo["history"][2]
+    
+    #获取上一轮的赢家位置
+    def getLastRoundWinSeat(self):
+        return self.globalInfo["history"][3]
+    
     #获取当前轮出牌历史
     def getCurrRoundPlayHistory(self):
-        play_seq = []
-        for i in range(len(self.globalInfo["history"][1])):
-            play_seq.append(self.globalInfo["history"][1][i][:])
-        return play_seq
+        return self.globalInfo["history"][1]
+        # play_seq = []
+        # for i in range(len(self.globalInfo["history"][1])):
+        #     play_seq.append(self.globalInfo["history"][1][i][:])
+        # return play_seq
+    
+    #获取所有出牌历史，返回索引
+    def getPlayHistory(self):
+        return self.play_seq
+    
     #获取当前轮的首出牌人位置
     def getFristPlaySeat(self):
         return self.globalInfo["history"][3]
-    #获取最后一次的叫分
-    def getLeastBidScore(self):        
-        for i in range(__PLAYER_COUNT__):
-            if self.globalInfo["bid_seq"][-i-1][1] > 0:
-                return self.globalInfo["bid_seq"][-i-1][1]
+    
+    #获取闲家升级所需的分数线，固定为80分
+    def getLeastBidScore(self):
+        return 80
+    
+    #叫主队列
+    def getBidSeq(self):
+        return self.globalInfo["bid_seq"][:]
+    
+    #获取最后叫主的人座位
+    def getLastBidSeat(self):
+        return self.globalInfo["bidsseat"]
+    
+    #获取当前可叫主的动作
+    #return ['', s, h, c, d, n之一]
+    def getLegalBidActions(self, seat):
+        actions = ['']#'', s, h, c, d, n
+        len_bid_qeq = len(self.globalInfo["bid_seq"])#[seat, suit]
+        if len_bid_qeq == 0:
+            handcards = self.getPlayerHandCards(seat)
+            level_int = __CARDSCALE__.index(self.getLevel())*4
+            levels_int = [[level_int, level_int + 54, 's'], [level_int+1, level_int+1 + 54, 'h'], [level_int+2, level_int+2 + 54, 'c'], [level_int+3, level_int+3 + 54, 'd']]
+            for level_int_card in levels_int:
+                if level_int_card[0] in handcards or level_int_card[1] in handcards:
+                    actions.append(level_int_card[2])
+            levels_int = [[52,52+54,'n'], [53,53+54,'n']]
+            for level_int_card in levels_int:
+                if level_int_card[0] in handcards and level_int_card[1] in handcards:
+                    actions.append(level_int_card[2])
+                        
+        elif len_bid_qeq == 1:
+            suit = self.globalInfo["bid_seq"][-1][1]
+            if suit in __SUITSET__:
+                handcards = self.getPlayerHandCards(seat)
+                level_int = __CARDSCALE__.index(self.getLevel())*4
+                levels_int = [[level_int, level_int + 54, 's'], [level_int+1, level_int+1 + 54, 'h'], [level_int+2, level_int+2 + 54, 'c'], [level_int+3, level_int+3 + 54, 'd'], [52,52+54,'n'], [53,53+54,'n']]
+                for level_int_card in levels_int:
+                    if level_int_card[0] in handcards and level_int_card[1] in handcards:
+                        actions.append(level_int_card[2])
+                        
+        elif len_bid_qeq == 2:
+            suit = self.globalInfo["bid_seq"][-1][1]
+            if suit in __SUITSET__:
+                handcards = self.getPlayerHandCards(seat)
+                level_int = __CARDSCALE__.index(self.getLevel())*4
+                levels_int = [[52,52+54,'n'], [53,53+54,'n']]
+                for level_int_card in levels_int:
+                    if level_int_card[0] in handcards and level_int_card[1] in handcards:
+                        actions.append(level_int_card[2])
             
-        #self.globalInfo["bid_seq"].append([bid_seat, bid_score])
+        return actions
     
 
     #分析得到拖拉机牌型（大小王和级牌当然不会参与拖拉机；可选单牌）
@@ -1733,7 +1821,7 @@ class tractorGame():
             all_hands[__SUSPECT__] = ret_suspect.get(__SUSPECT__, [])
             
             for k,pokers in enumerate(all_hands):
-                all_hands[k] = self.PokerList2Num(pokers, deck.copy())
+                all_hands[k] = self.PokerList2Num(pokers, deck)
                 
             return all_hands
         
@@ -1750,12 +1838,14 @@ class tractorGame():
         if self.checkPokerType(standard_move, level) != __SUSPECT__: # 不是甩牌
             pok = [self.num2Poker(p) for p in standard_move] if type(standard_move[0]) == int else standard_move
             own_pok = [self.num2Poker(p) for p in deck]
-            response = self.checkResUnSuspect(standard_poker, own_pok, level)
-            if response:
-                response = self.PokerList2Num(response, deck)
-                return response
+            all_hands = self.checkResUnSuspect(standard_poker, own_pok, level)
+            if sum([len(pokers) for pokers in all_hands]) > 0:
+                for i,pokers in enumerate(all_hands):
+                    all_hands[i] = self.PokerList2Num(pokers, deck)
+                return all_hands
+            
+            #没有合法牌型，垫牌
             else:
-                response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
                 #出的是主牌
                 if standard_poker[0] in self.Major:
                     #print("major")
@@ -1783,7 +1873,7 @@ class tractorGame():
                         
                     #手上主牌够，必须出主牌
                     else:
-                        response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
+                        # response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
                         target_len = len(standard_poker)
                         #单牌
                         if target_len == 1:
@@ -1860,7 +1950,7 @@ class tractorGame():
                         # return attach_resp
                     
                     else: #副牌数量够，必须要出副牌
-                        response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
+                        # response = self.checkResUnSuspect(standard_poker, own_pok, level)#test code
                         target_len = len(standard_poker)                        
                         if target_len == 1:#单牌
                             all_hands[__SINGLE__] = [[p] for p in deck_suit]
@@ -1925,19 +2015,19 @@ class tractorGame():
 
         ret = []
         
-        #test code
-        for tp, actions in enumerate(all_hands):
-            for poks in actions:
-                _deck = deck[:] + []
-                for pok in poks:
-                    if type(pok) == list:
-                        self.getLegalPlayCard(history, deck, level)
-                        pass
-                    cardid = self.Poker2Num(pok, _deck)
-                    if cardid not in _deck:
-                        print(self.Pokers2Num(poks,_deck))
-                        self.getLegalPlayCard(history, deck, level)
-                    _deck.remove(cardid)
+        # #todo
+        # for tp, actions in enumerate(all_hands):
+        #     for poks in actions:
+        #         _deck = deck[:] + []
+        #         for pok in poks:
+        #             if type(pok) == list:
+        #                 self.getLegalPlayCard(history, deck, level)
+        #                 pass
+        #             cardid = self.Poker2Num(pok, _deck)
+        #             if cardid not in _deck:
+        #                 print(self.Pokers2Num(poks,_deck))
+        #                 self.getLegalPlayCard(history, deck, level)
+        #             _deck.remove(cardid)
         
         
         
@@ -1954,20 +2044,20 @@ class tractorGame():
                     repeats2[outstr] = poks
                 repeats[outstr] = poks
         
-        #test code
-        global __MAX_ACTION_NUM__
-        if __MAX_ACTION_NUM__ < len(out1):
-            __MAX_ACTION_NUM__ = len(out1)
-            print(f'最大动作空间：{__MAX_ACTION_NUM__}, pid={os.getpid()}')
-            for tp, actions in enumerate(all_hands):
-                sout = sorted(actions)
-                if sout != actions:
-                    for subout in actions:
-                        if subout not in sout:
-                            pass
+        # todo
+        # global __MAX_ACTION_NUM__
+        # if __MAX_ACTION_NUM__ < len(out1):
+        #     __MAX_ACTION_NUM__ = len(out1)
+        #     # print(f'最大动作空间：{__MAX_ACTION_NUM__}, pid={os.getpid()}')
+        #     for tp, actions in enumerate(all_hands):
+        #         sout = sorted(actions)
+        #         if sout != actions:
+        #             for subout in actions:
+        #                 if subout not in sout:
+        #                     pass
 
-        for k,v in all_hands.items():
-            all_hands[k] = self.Pokers2Num(v, deck.copy())
+        for k, v in enumerate(all_hands):
+            all_hands[k] = self.PokerList2Num(v, deck)
         return all_hands
     
     
@@ -2024,197 +2114,287 @@ class tractorGame():
         match_poks = list(combinations(own_pok, len(standard_pok)))
         return match_poks
                     
+    def _deal_to(self, p):
+        idx = self.globalInfo["deal_count"][p]
+        card = self.globalInfo["allocation"][p][idx]
+        self.player_hand_cards[p].append(card)
+        self.player_hand_decks[p].append(self.num2Poker(card))
+        self.globalInfo["deal_count"][p] += 1
+        self.globalInfo["dealt"] += 1
+        self.globalInfo["deliver"] = [card]
+
+    def _process_bid(self, response):
+        p = self.globalInfo["playerpos"]
+        if response is None:
+            seat, suit = p, ""
+        else:
+            seat = response[0]
+            suit = response[1] if len(response) > 1 else ""
+        if seat != p:
+            self.setError(seat, "ILLEGAL_MOVE")
+            return
+
+        # 叫主/反主资格校验：必须命中当前阶段公开的合法报主动作
+        # （无叫时可报单张级牌/对子/双王；已报主后只能对子反主；已反主后只能双王无主）
+        if suit not in self.getLegalBidActions(seat):
+            self.setError(seat, "ILLEGAL_MOVE")
+            return
+
+        banking = self.globalInfo["banking"]
+        if suit in __SUITSET__:
+            # 叫主或反主：直接指定主花色
+            banking["major"] = suit
+            if self.globalInfo["first_round"]:
+                banking["banker"] = seat
+                banking["banker_last"] = seat
+        elif suit == "n":
+            # 叫无主
+            banking["major"] = "n"
+            if self.globalInfo["first_round"]:
+                banking["banker"] = seat
+                banking["banker_last"] = seat
+        # 空字符串表示不叫，不改变任何状态
+        else:
+            return
+        
+        self.globalInfo["bid_seq"].append([seat, suit])
+        self.globalInfo["banking"] = banking
+        
+        if hasattr(self, '_game_log'):
+            print(f"玩家{seat}叫主, 花色:{suit}, 级数:{self.getLevel()}")
+
+    def _advance_deal(self):
+        total = __PLAYER_COUNT__ * __HAND_CARD_NUM__
+        if self.globalInfo["dealt"] < total:
+            nextplayer = (self.globalInfo["playerpos"] + 1) % __PLAYER_COUNT__
+            self._deal_to(nextplayer)
+            self.globalInfo["playerpos"] = nextplayer
+            self.globalInfo["stage"] = "bid"
+        else:
+            self._finalize_deal()
+
+    def _finalize_deal(self):
+        banking = self.globalInfo["banking"]
+        # 发牌结束仍无人叫主花色，本局打无主
+        if banking["major"] == "":
+            banking["major"] = "n"
+        if banking["banker"] == -1:
+            banking["banker"] = self.globalInfo.get("first_dealer", 0)
+            banking["banker_last"] = banking["banker"]
+        banker = banking["banker"]
+        major = banking["major"]
+        self.globalInfo["banking"] = banking
+        self.setMajor(major, self.globalInfo["level"])
+        self.player_hand_cards[banker].extend(self.globalInfo["publiccard"])
+        self.player_hand_decks[banker].extend([self.num2Poker(card) for card in self.globalInfo["publiccard"]])
+        self.globalInfo["bidsseat"] = self.globalInfo["bid_seq"][-1][0] if len(self.globalInfo["bid_seq"]) > 0 else banker#最后叫牌的人
+        self.globalInfo["stage"] = "cover"
+        self.globalInfo["playerpos"] = banker#首轮从庄家开始出牌
+        
+        if hasattr(self, '_game_log'):
+            print(f"叫牌阶段结束, 花色:{self.getMajorColor()}, 级数:{self.getLevel()}, 庄家:{self.getBanker()}")
+
     # initdata里包含了庄家、牌型、级牌
     # global里包含了主花色、级牌、庄家（覆盖）、报主情况
     def step(self, response=None):
         self.get_score = 0
         self.get_score_pok = []
+        # 每步重置错误记录：否则一次非法动作会让 getError 永久非空
+        self.errored = [[] for _ in range(__PLAYER_COUNT__)]
         self.erro_code = 0
         self.step_count += 1
         
-        try: 
-            # elif self.globalInfo["stage"] == "deal":
-            #     pass
+        # try: 
+        # 叫主/反主/无主/不叫，处理完后发下一张牌或结束发牌
+        if self.globalInfo["stage"] == "bid":
+            self._process_bid(response)
+            # 非法叫主/反主已记账，直接中止本步，避免继续发牌推进状态
+            if self.erro_code:
+                return
+            self._advance_deal()
+
+        #埋牌
+        elif self.globalInfo["stage"] == "cover":
+            cover_seat = response[0]
+            cover_cards = list(response[1])
+            banker = self.globalInfo["banking"]["banker"]
+            # 只有庄家能埋底，且必须埋满底牌张数（8 张）
+            if cover_seat != banker:
+                self.setError(cover_seat, "ILLEGAL_MOVE")
+                return
+            if len(cover_cards) != 8:
+                self.setError(cover_seat, "INVALID_MOVE")
+                return
+
+            my_hand_cards = self.player_hand_cards[cover_seat][:]
+            # 先校验（含重复牌），校验通过后再改状态，避免半途失败留下脏数据
+            remain = Counter(my_hand_cards)
+            for c in cover_cards:
+                if remain[c] <= 0:
+                    self.setError(cover_seat, "NOT_YOUR_POKER")
+                    return
+                remain[c] -= 1
+            for c in cover_cards:
+                self.player_hand_cards[cover_seat].remove(c)
+                self.player_hand_decks[cover_seat].remove(self.num2Poker(c))
+            self.globalInfo["publiccard"] = cover_cards
+
+            self.globalInfo["history"] = [[],[], cover_seat, cover_seat]
+            self.globalInfo["game_score"] = 0
             
-            #叫分
-            if self.globalInfo["stage"] == "bid":
-                bid_seat = response[0]
-                bid_score = response[1]
-                self.globalInfo["bid_seq"].append([bid_seat, bid_score])
-                
-                if __PLAYER_COUNT__ <= len(self.globalInfo['bid_seq']):
-                    bid_win = 0                    
-                    recent = self.globalInfo['bid_seq'][-__PLAYER_COUNT__:]
-                    for (i,s) in enumerate(recent):
-                        if s[1] > 0:
-                            bid_win = -(__PLAYER_COUNT__-i)
+            self.globalInfo["stage"] = "play"
+            
+            if hasattr(self, '_game_log'):
+                print(f"埋牌阶段, 埋牌玩家:{cover_seat}, 埋牌:{[self.num2Poker(p) for p in cover_cards]}, 手牌:{[self.num2Poker(p) for p in my_hand_cards]}")
+        
+        # #开始比赛
+        elif self.globalInfo["stage"] == 'ready':
+            self.globalInfo["stage"] = 'play'
+            
+        #一回合结束
+        elif self.globalInfo["stage"] == 'roundend':
+            self.globalInfo["stage"] = 'play'
+            
+        # 正式出牌
+        elif self.globalInfo["stage"] == "play":
+            banker = self.globalInfo["banking"]["banker"]
+            major = self.globalInfo["banking"]["major"]
+            # self.setMajor(major, self.globalInfo["level"])
+            # old_publiccard = full_input["initdata"]["publiccard"]
+            # new_publiccard = full_input["log"][201][str(banker)]["response"]
+            # big_hold = old_alloc[banker] + old_publiccard
+            old_score = self.globalInfo["game_score"]
+            # for pok in new_publiccard:
+            #     big_hold.remove(pok)
+            # new_alloc = old_alloc.copy() + []
+            # new_alloc[banker] = big_hold
+            
+            history = self.globalInfo["history"]
+            currplayer = response[0]
+            curr_move = response[1]
+            # 校验行动者：必须轮到 playerpos 出牌
+            if currplayer != self.globalInfo["playerpos"]:
+                self.setError(currplayer, "ILLEGAL_MOVE")
+                return
+            # if type(curr_move) is not list:
+            #     self.setError(currplayer, "INVALID_FORMAT")
+            # 空出牌属于非法动作，直接受控判非法（避免后续 checkPokerType 越界）
+            if curr_move is None or len(curr_move) == 0:
+                self.setError(currplayer, "INVALID_MOVE")
+                return
+            # latest_request = full_input["log"][-2]
+            
+            for pok in curr_move:
+                if pok not in self.player_hand_cards[currplayer]:
+                    self.setError(currplayer, "PLAY CARD NOT YOUR POKER")
+                    return
+            
+            play_move = [self.num2Poker(p) for p in curr_move]        
+            outpok = self.checkLegalMove(play_move, self.globalInfo["level"], major, currplayer, history[1], self.player_hand_cards, banker)
+            
+            # collect history
+            my_hand_cards = self.player_hand_cards[currplayer][:]
+            outid = []
+            for pok in outpok:
+                id = self.Poker2Num(pok, self.player_hand_cards[currplayer])
+                outid.append(id)
+                self.player_hand_cards[currplayer].remove(id)
+                self.player_hand_decks[currplayer].remove(pok)
+            
+            #出牌序列
+            self.play_seq.append([currplayer, outid, self.checkPokerType(play_move, self.globalInfo["level"])])
+            
+            if hasattr(self, '_game_log'):
+                action = self.play_seq[-1]
+                round = max(0, len(self.play_seq)-1)//__PLAYER_COUNT__
+                print(f"出牌阶段, 第{round}轮, 玩家:{action[0]}, 牌型{action[2]}, 出牌:{outpok}, 手牌:{[self.num2Poker(p) for p in my_hand_cards]}")
+            
+            new_history = history[1]            
+            if len(new_history) == 0:
+                history[3] = currplayer
+            if len(new_history) < __PLAYER_COUNT__:#len(new_history) < 3
+                nextplayer = (currplayer + 1) % __PLAYER_COUNT__
+            new_history.append(outid)
+            self.player_played_cards[currplayer].extend(outid)
+            old_history = history[0]
+        
+            if len(new_history) == __PLAYER_COUNT__: # 本回合为该轮最后一次出牌
+                winner = self.checkWinner(history[1], currplayer, self.globalInfo["level"], major, banker)
+                nextplayer = winner
+                old_history = new_history
+                new_history = []
+                history[2] = history[3] + 0
+                history[3] = winner
+
+                if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
+                    # 扣底
+                    if self.checkPokerType(history[1][0], self.globalInfo["level"]) != __SUSPECT__:
+                        mult = len(history[1][0])
+                    else:
+                        divided, _ = self.checkThrow(history[1][0], [[]], (currplayer - (__PLAYER_COUNT__ - 1)) % __PLAYER_COUNT__, self.globalInfo["level"], major, check=False)
+                        divided.sort(key=lambda x: len(x), reverse=True)
+                        if len(divided[0]) >= 4:
+                            mult = len(divided[0]) * 2
+                        elif len(divided[0]) == 2:
+                            mult = 4
+                        else: 
+                            mult = 2
+
+                    publicscore = 0
+                    for pok in self.globalInfo["publiccard"]: 
+                        p = self.num2Poker(pok)
+                        if p[1] == "5":
+                            publicscore += 5
+                        elif p[1] == "0" or p[1] == "K":
+                            publicscore += 10
                     
-                    #每个人都必须叫分
-                    if bid_win != 0:
-                        self.globalInfo["playerpos"] = self.globalInfo['bid_seq'][bid_win][0]
-                        self.globalInfo['bidsseat'] = self.globalInfo["playerpos"]
-                        self.globalInfo['bidscore'] = self.globalInfo['bid_seq'][bid_win][1]
-                        self.player_hand_cards[self.globalInfo['bidsseat']].extend(self.globalInfo["publiccard"])
-                        self.globalInfo["stage"] = "cover"
-                        major_color = __SUITSET__[response[2]]
-                        newbanking = {'major': major_color, "banker": self.globalInfo["playerpos"]}
-                        self.globalInfo["banking"] = newbanking
-                        self.setMajor(major_color, self.globalInfo["level"])
-                        
-                        all_hand_cards = {i:0 for i in range(108)}            
-                        for hand_cards in self.player_hand_cards:
-                                for c in hand_cards:
-                                    all_hand_cards[c] += 1
-                                    if all_hand_cards[c] > 1:
-                                        raise ValueError("repeated hand card card:", c)
-                else:
-                    self.globalInfo["playerpos"] = (self.globalInfo["playerpos"] + 1) % __PLAYER_COUNT__
-            #埋牌
-            elif self.globalInfo["stage"] == "cover":
-                cover_seat = response[0]
-                cover_cards = response[1]
-                
-                
-                for c in cover_cards: 
-                    if c not in self.player_hand_cards[cover_seat]:
-                        raise ValueError("repeated hand card card:", c)
-                    self.player_hand_cards[cover_seat].remove(c)
-                self.globalInfo["publiccard"] = cover_cards
-
-                self.globalInfo["history"] = [[],[], [cover_seat], [cover_seat]]
-                self.globalInfo["game_score"] = 0
-                
-                
-                
-                self.globalInfo["stage"] = "ready"
-            
-            # #开始比赛
-            elif self.globalInfo["stage"] == 'ready':
-                self.globalInfo["stage"] = 'play'
-                
-            #一回合结束
-            elif self.globalInfo["stage"] == 'roundend':
-                self.globalInfo["stage"] = 'play'
-                
-            # 正式出牌
-            elif self.globalInfo["stage"] == "play":
-                banker = self.globalInfo["banking"]["banker"]
-                major = self.globalInfo["banking"]["major"]
-                # self.setMajor(major, self.globalInfo["level"])
-                # old_publiccard = full_input["initdata"]["publiccard"]
-                # new_publiccard = full_input["log"][201][str(banker)]["response"]
-                # big_hold = old_alloc[banker] + old_publiccard
-                old_score = self.globalInfo["game_score"]
-                # for pok in new_publiccard:
-                #     big_hold.remove(pok)
-                # new_alloc = old_alloc.copy() + []
-                # new_alloc[banker] = big_hold
-                
-                history = self.globalInfo["history"]
-                currplayer = response[0]
-                curr_move = response[1]
-                # if type(curr_move) is not list:
-                #     self.setError(currplayer, "INVALID_FORMAT")
-                # if len(curr_move) == 0:
-                #     self.setError(currplayer, "INVALID_MOVE")
-                # latest_request = full_input["log"][-2]
-                
-                for pok in curr_move:
-                    if pok not in self.player_hand_cards[currplayer]:
-                        self.setError(currplayer, "NOT_YOUR_POKER")
-                play_move = [self.num2Poker(p) for p in curr_move]
-                outpok = self.checkLegalMove(play_move, self.globalInfo["level"], major, currplayer, history[1], self.player_hand_cards, banker)
-                # collect history
-                outid = []
-                for pok in outpok:
-                    id = self.Poker2Num(pok, self.player_hand_cards[currplayer])
-                    outid.append(id)
-                    self.player_hand_cards[currplayer].remove(id)
-                    # del self.player_hand_cards[currplayer][self.player_hand_cards[currplayer].index(id)]
-                
-                new_history = history[1]            
-                if len(new_history) == 0:
-                    history[3] = currplayer
-                if len(new_history) < __PLAYER_COUNT__:#len(new_history) < 3
-                    nextplayer = (currplayer + 1) % __PLAYER_COUNT__
-                new_history.append(outid)
-                self.player_played_cards[currplayer].extend(outid)
-                old_history = history[0]
-            
-                if len(new_history) == __PLAYER_COUNT__: # 本回合为该轮最后一次出牌
-                    winner = self.checkWinner(history[1], currplayer, self.globalInfo["level"], major, banker)
-                    nextplayer = winner
-                    old_history = new_history
-                    new_history = []
-                    history[2] = history[3] + 0
-                    history[3] = winner
-
-                    if len(self.player_hand_cards[currplayer]) == 0: # 本局结束
-                        # 扣底
-                        if self.checkPokerType(history[1][0], self.globalInfo["level"]) != __SUSPECT__:
-                            mult = len(history[1][0])
-                        else:
-                            divided, _ = self.checkThrow(history[1][0], [[]], (currplayer - (__PLAYER_COUNT__ - 1)) % __PLAYER_COUNT__, self.globalInfo["level"], major, check=False)
-                            divided.sort(key=lambda x: len(x), reverse=True)
-                            if len(divided[0]) >= 4:
-                                mult = len(divided[0]) * 2
-                            elif len(divided[0]) == 2:
-                                mult = 4
-                            else: 
-                                mult = 2
-
-                        publicscore = 0
-                        for pok in self.globalInfo["publiccard"]: 
-                            p = self.num2Poker(pok)
-                            if p[1] == "5":
-                                publicscore += 5
-                            elif p[1] == "0" or p[1] == "K":
-                                publicscore += 10
-                        
-                        self.Reward(publicscore*mult, winner, banker)
-                        new_score = old_score + self.get_score
-                        self.globalInfo["game_score"] = new_score
-                        
-                        history[0] = old_history
-                        history[1] = new_history
-                        self.globalInfo["history"] = history
-                        self.globalInfo["playerpos"] = winner
-                        self.globalInfo["stage"] = 'gameend'
-                        self.globalInfo["banking"]["banker"] = winner
-                        self.EndGame(banker, new_score)
-                        return
-
-
-                    # 非终止回合出现分数变动，说明甩牌失败
-                    if self.get_score != 0: 
-                        pass
-                    new_score = old_score + self.get_score# get_score 为负数就是罚分
+                    self.Reward(publicscore*mult, winner, banker)
+                    new_score = old_score + self.get_score
                     self.globalInfo["game_score"] = new_score
-                    if new_score < 0:#test code
-                        pass
+                    
+                    history[0] = old_history
+                    history[1] = new_history
+                    self.globalInfo["history"] = history
+                    self.globalInfo["playerpos"] = winner
+                    self.globalInfo["stage"] = 'gameend'
+                    
+                    if hasattr(self, '_game_log'):
+                        print(f'游戏结束：庄家:{self.getBanker()}, 闲家本局得分:{new_score}')
+                        
+                    self.EndGame(banker, new_score)
+                    return
 
-                history[0] = old_history
-                history[1] = new_history
-                self.globalInfo["history"] = history
-                self.globalInfo["playerpos"] = nextplayer
-                self.globalInfo["stage"] = len(new_history)==0 and "roundend" or "play"
 
-        except Exception as e:
-            traceback.print_exc()
-            raise e
+                # 非终止回合出现分数变动，说明甩牌失败
+                if self.get_score != 0: 
+                    pass
+                new_score = old_score + self.get_score# get_score 为负数就是罚分
+                self.globalInfo["game_score"] = new_score
+                if hasattr(self, '_game_log'):
+                    print(f"得分更新, 本轮得分:{self.get_score}, 总得分:{new_score}")
+
+            history[0] = old_history
+            history[1] = new_history
+            self.globalInfo["history"] = history
+            self.globalInfo["playerpos"] = nextplayer
+            self.globalInfo["stage"] = len(new_history)==0 and "roundend" or "play"
+
+        #test code
+        # except Exception as e:
+        #     traceback.print_exc()
+        #     raise e
 
     #小局结束
     def isInningEnd(self):
         return self.step_count == -1
     
-    #大局结束
-    def isFinalEnd(self):
-        return self.globalInfo["stage"] == 'finalend'
-     
     #获取玩家的已出牌
     def getPlayedCards(self, play_pos):
         return self.player_played_cards[play_pos][:]
-        
+    
+    #打印出牌过程
+    def print_game_log(self, b):
+        self._game_log = b    
 
 __MAX_ACTION_NUM__ = 0
 def run_random(env):
@@ -2223,31 +2403,33 @@ def run_random(env):
     stage = env.getStage()
     play_pos = env.getPlayerPosition()
 
-    if stage == "deal":
-        get_card = env.getDeliver()[0]
-        called = env.getCalled()
-        snatched = env.getSnatched()
-        
-        hold = env.getPlayerHandCards(play_pos)
-        response = [play_pos, env.call_Snatch(get_card, hold, called, snatched, level)]
+    if stage == "bid":
+        # 随机叫主：多数不叫，偶尔叫一个花色或反主/无主
+        r = random.random()
+        if r < 0.6:
+            suit = ""
+        elif r < 0.9:
+            suit = random.choice(__SUITSET__)
+        else:
+            suit = "n"
+        response = [play_pos, suit]
     elif stage == "cover":
         publiccard = env.getPublicCards()
         hold = env.getPlayerHandCards(env.getBanker())
-        # response = [env.getBanker(), env.cover_Pub(publiccard, hold)]
-        response = [env.getBanker(), env.cover_PubEx(publiccard, hold, level)]
+        # cover_PubEx 的 deck 参数为不含底牌的 25 张手牌
+        deck = [c for c in hold if c not in publiccard]
+        # response = [env.getBanker(), env.cover_Pub(publiccard, deck)]
+        response = [env.getBanker(), env.cover_PubEx(publiccard, deck, level)]
     elif stage == "play":
         history_curr = env.getCurrRoundPlayHistory()
         hold = env.getPlayerHandCards(play_pos)
         
         
         playedCards = env.getLegalPlayCard(history_curr, hold, level)
-        if len(playedCards) == 0:#test code
-            playedCards = env.getLegalPlayCard(history_curr, hold, level)
-            pass
-        playedCardscnt = len(playedCards)
+        
         playedCards = playedCards[random.randint(0, len(playedCards)-1)]
-        if type(playedCards) is not list:#test code
-            playedCards = env.getLegalPlayCard(history_curr, hold, level)
+        # if type(playedCards) is not list:#todo
+        #     playedCards = env.getLegalPlayCard(history_curr, hold, level)
         response = [play_pos, playedCards]
     elif stage == "roundend":
         pass
@@ -2408,23 +2590,29 @@ class TractorBot:
             return score
         return 0
     
+    
+    
 def run(env):
     bot = TractorBot(env)
     play_pos = env.getPlayerPosition()
     stage = env.getStage()
     level = env.getLevel()
 
-    if stage == "deal":
-        get_card = env.getDeliver()[0]
-        called = env.getCalled()
-        snatched = env.getSnatched()
-        hold = env.getPlayerHandCards(play_pos)
-        response = bot.call_snatch(get_card, hold, called, snatched, level)
-        return [play_pos, response]
+    if stage == "bid":
+        # 简单叫主策略：随机叫花色/无主/不叫
+        r = random.random()
+        if r < 0.6:
+            suit = ""
+        elif r < 0.9:
+            suit = random.choice(__SUITSET__)
+        else:
+            suit = "n"
+        return [play_pos, suit]
     elif stage == "cover":
         publiccard = env.getPublicCards()
         hold = env.getPlayerHandCards(env.getBanker())
-        response = bot.cover_pub(publiccard, hold, level)
+        deck = [c for c in hold if c not in publiccard]
+        response = bot.cover_pub(publiccard, deck, level)
         return [env.getBanker(), response]
     elif stage == "play":
         history = env.getCurrRoundPlayHistory()
@@ -2439,15 +2627,22 @@ def runGame():
         # print(f'start round,{_}, pid={os.getpid()}\r\n')
         env = tractorGame()
         envs[os.getpid()] = env
-        response = None     
+        env.reset()
+        response = None
         while True:
+            if response is None:
+                response = run_random(env)
+
             env.step(response)
-            
-            if env.isInningEnd():
-                print(env.total_score, env.player_level)
+
             if env.isFinalEnd():
                 # print(env.globalInfo)
                 break
+            if env.getStage() == "gameend":
+                env.reset()
+                response = None
+                continue
+
             response = run_random(env)
 
 

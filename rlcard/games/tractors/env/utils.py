@@ -35,11 +35,15 @@ h:红桃 d:方片 s:黑桃 c:草花
 __CARDSCALE__ = ['A','2','3','4','5','6','7','8','9','0','J','Q','K']
 __SUITSET__ = ['s','h','c','d']# h:红桃 d:方片 s:黑桃 c:草花 
 __MAJOR__ = ['jo', 'Jo']#小王 大王
-__POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']
+__POINT__ = ['2','3','4','5','6','7','8','9','0','J','Q','K','A']#顺序点数
 __PLAYER_COUNT__ = 4
-__CARDS_NUM__ = (108)
+__CARDS_NUM__ = 108
 
 __HAND_CARD_NUM__ = 25#手牌数量
+
+#叫主动作：0=不叫，1-4=黑桃/红桃/草花/方片，5=无主 '', 's', 'h', 'c', 'd', 'n'
+__BID_ACTIONS__ = [''] + __SUITSET__ + ['n']
+__BID_ACTION_NUM__ = len(__BID_ACTIONS__)
 
 __MAX_SCORE__ = 40#最多分数，1个代表5分
 
@@ -52,8 +56,15 @@ __SUSPECT__ = 4
 __DISCARD__ = 5
 __WRONG__ = 6
 
-Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
-               11: 8, 12: 9, 13: 10, 15: 11, 17: 12}
+__PLAY_ROLES__ = ['banker', 'banker_down', 'banker_op', 'banker_up']
+__POSITIONS__ = ['banker', 'banker_down', 'banker_op', 'banker_up', 'bid', 'cover']
+
+#分数牌
+__SCORE__CARD__ = [16, 17, 18, 19]
+__SCORE__CARD__.extend([c+54 for c in __SCORE__CARD__])
+__SCORE__CARD__.extend([36, 37, 38, 39, 48, 49, 50, 51])
+__SCORE__CARD__.extend([c+54 for c in __SCORE__CARD__[-8:]])
+
 
 NumOnes2Array = {0: np.array([0, 0, 0, 0]),
                  1: np.array([1, 0, 0, 0]),
@@ -204,49 +215,50 @@ def cards2matrix(list_cards, major='s', level='2'):
     matrix = np.transpose(matrix, (0,2,1))
     
     #环境的牌值是从A-K，o，O，将A和2放o前面，方便卷积提取牌型特征，
-    new_order = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 1, 13, 14]
-    
-    # # 根据级数调整列顺序数组
+    # new_order = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 1, 13, 14]    
+    # # 根据主花色调整行序列数组
     # # new_order = list(range(matrix.shape[2]))
-    level = __CARDSCALE__.index(level)
-    if level != 1:
-        if level == 0:
-            new_order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 13, 14]
-        else:
-            new_order = list(range(1, 15))
-            new_order.insert(-2, 0)  # 在12后面插入
-            del new_order[level-1]
-            new_order.insert(-2, level)  # 插入级牌
+    # level = __CARDSCALE__.index(level)
+    # if level != 1:
+    #     if level == 0:
+    #         new_order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 13, 14]
+    #     else:
+    #         new_order = list(range(1, 15))
+    #         new_order.insert(-2, 0)  # 在12后面插入
+    #         del new_order[level-1]
+    #         new_order.insert(-2, level)  # 插入级牌
             
         # view = matrix[:,:,level:-2]
         # view[:]=np.roll(view, shift=-1, axis=2)
-    matrix = matrix[:, :, new_order]
+    # matrix = matrix[:, :, new_order]
 
     # # 根据主花色调整行序列数组
-    major = __SUITSET__.index(major)
-    if major != 0:
-        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+    # 无主(n)时不交换花色行
+    # major = 0 if major not in __SUITSET__ else __SUITSET__.index(major)
+    # if major != 0:
+    #     matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
     return matrix
 
 
 def matrix2cards(matrix, major='s', level='2'):
     #转换花色
-    major = __SUITSET__.index(major)
-    if major != 0:
-        matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
+    # 无主(n)时不交换花色行
+    # major = 0 if major not in __SUITSET__ else __SUITSET__.index(major)
+    # if major != 0:
+    #     matrix[:, [0,major], 0:13] = matrix[:, [major,0], 0:13]
     
     #转换级牌
-    new_order = [11, 12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
-    level = __CARDSCALE__.index(level)
-    if level != 1:
-        if level == 0:
-            new_order = [12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]
-        else:
-            new_order = [11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
-            new_order.insert(level, 12)
-        # view = mat[:,:,level:-2]
-        # view[:]=np.roll(view, shift=1, axis=2)
-    matrix = matrix[:, :, new_order]
+    # new_order = [11, 12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
+    # level = __CARDSCALE__.index(level)
+    # if level != 1:
+    #     if level == 0:
+    #         new_order = [12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14]
+    #     else:
+    #         new_order = [11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14]
+    #         new_order.insert(level, 12)
+    #     # view = mat[:,:,level:-2]
+    #     # view[:]=np.roll(view, shift=1, axis=2)
+    # matrix = matrix[:, :, new_order]
     
 
     matrix = np.transpose(matrix, (0,2,1))
@@ -325,6 +337,8 @@ __all__ = [
     "__CARDS_NUM__",
     '__MAX_SCORE__',
     "__HAND_CARD_NUM__",
+    '__BID_ACTIONS__',
+    '__BID_ACTION_NUM__',
     "cards2matrix",
     "get_one_hot_array",
     "get_full_hot_array",
@@ -336,4 +350,7 @@ __all__ = [
     '__DISCARD__',
     '__WRONG__',
     '__HAND_CARD_NUM__',
+    '__PLAY_ROLES__',
+    '__POSITIONS__',
+    '__SCORE__CARD__',
 ]
